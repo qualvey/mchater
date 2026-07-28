@@ -868,7 +868,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemDiv = document.createElement('div');
       const isSel = selectedTargetAdmin === adm.username;
       itemDiv.className = `admin-option-item ${isSel ? 'selected' : ''}`;
-      const roleLabel = adm.role === 'super_admin' ? '主管理' : '客服';
+      const roleLabel = adm.role === 'super_admin' ? '主管' : '客服';
       const displayName = adm.displayName || adm.username;
       itemDiv.innerHTML = `
         <div class="admin-option-info">
@@ -1138,10 +1138,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (adminRoleBadge) {
       if (currentAdminRole === 'super_admin') {
-        adminRoleBadge.textContent = '超级主管理';
+        adminRoleBadge.textContent = '客服主管';
         adminRoleBadge.classList.add('super');
       } else {
-        adminRoleBadge.textContent = '客服管理员';
+        adminRoleBadge.textContent = '客服专员';
         adminRoleBadge.classList.remove('super');
       }
     }
@@ -1515,7 +1515,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="user-name">${escapeHTML(displayName)}</span>
             <span class="status-dot ${adm.online ? 'online' : ''}"></span>
           </div>
-          <div class="user-reason">${isSuper ? '超级主管理' : '客服管理员'} (${adm.online ? '在线' : '离线'})</div>
+          <div class="user-reason">${isSuper ? '客服主管' : '客服专员'} (${adm.online ? '在线' : '离线'})</div>
         </div>
       `;
       admDiv.addEventListener('click', () => selectAdminInternalTarget(adm.username));
@@ -1560,7 +1560,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </td>
         <td style="padding: 10px 12px;">
-          <span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '超级主管理' : '客服管理员'}</span>
+          <span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '客服主管' : '客服专员'}</span>
         </td>
         <td style="padding: 10px 12px; text-align: right;">
           ${isSuper ? '<span style="font-size:11px; color:var(--text-dim);">不可删除</span>' : `<button type="button" class="btn-icon btn-danger btn-delete-admin" data-username="${escapeHTML(adm.username)}" style="padding: 4px 8px; font-size: 11px;">🗑️ 删除</button>`}
