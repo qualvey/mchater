@@ -60,6 +60,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
+    display_name TEXT,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin',
     created_at TEXT NOT NULL,
@@ -75,13 +76,13 @@ db.exec(`
   );
 `);
 
-// Migration: Ensure target_admin column exists in messages table
+// Migration: Ensure display_name column exists in admins table
 try {
-  const tableInfo = db.prepare("PRAGMA table_info(messages)").all();
-  const hasTargetAdmin = tableInfo.some(col => col.name === 'target_admin');
-  if (!hasTargetAdmin) {
-    db.prepare("ALTER TABLE messages ADD COLUMN target_admin TEXT;").run();
-    console.log("[DB MIGRATION] Added 'target_admin' column to 'messages' table.");
+  const adminCols = db.prepare("PRAGMA table_info(admins)").all();
+  const hasDisplayName = adminCols.some(col => col.name === 'display_name');
+  if (!hasDisplayName) {
+    db.prepare("ALTER TABLE admins ADD COLUMN display_name TEXT;").run();
+    console.log("[DB MIGRATION] Added 'display_name' column to 'admins' table.");
   }
 } catch (e) {
   console.error("[DB MIGRATION ERROR]", e);
@@ -289,6 +290,7 @@ class ChatDatabase {
     return {
       id: admin.id,
       username: admin.username,
+      displayName: admin.display_name || admin.username,
       role: admin.role,
       createdAt: admin.created_at,
       lastLogin: now
@@ -296,12 +298,30 @@ class ChatDatabase {
   }
 
   static getAdminByUsername(username) {
-    const admin = db.prepare('SELECT id, username, role, created_at, last_login FROM admins WHERE username = ?').get(username);
-    return admin || null;
+    const admin = db.prepare('SELECT id, username, display_name, role, created_at, last_login FROM admins WHERE username = ?').get(username);
+    if (!admin) return null;
+    return {
+      id: admin.id,
+      username: admin.username,
+      displayName: admin.display_name || admin.username,
+      role: admin.role,
+      createdAt: admin.created_at,
+      lastLogin: admin.last_login
+    };
   }
 
   static getAllAdmins() {
-    return db.prepare('SELECT id, username, role, created_at, last_login FROM admins ORDER BY id ASC').all();
+    return db.prepare('SELECT id, username, display_name, role, created_at, last_login FROM admins ORDER BY id ASC').all();
+  }
+
+  static updateAdminDisplayName(username, displayName) {
+    const cleanUser = String(username || '').trim();
+    const cleanName = String(displayName || '').trim();
+    const result = db.prepare('UPDATE admins SET display_name = ? WHERE username = ?').run(cleanName || cleanUser, cleanUser);
+    if (result.changes === 0) {
+      throw new Error('管理员账号不存在');
+    }
+    return true;
   }
 
   static createAdmin(username, password, role = 'admin') {

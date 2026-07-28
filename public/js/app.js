@@ -812,6 +812,40 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAdminSelectorDropdown();
   }
 
+  function stringToHslColor(str, s = 65, l = 55) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const h = Math.abs(hash) % 360;
+    return `hsl(${h}, ${s}%, ${l}%)`;
+  }
+
+  function createAvatarSvg(name, role = 'user') {
+    const initial = String(name || 'U').trim().charAt(0).toUpperCase();
+    const bg1 = stringToHslColor(name || 'user', 70, 50);
+    const bg2 = stringToHslColor((name || 'user') + 'rev', 80, 40);
+
+    let icon = '👤';
+    if (role === 'super_admin') icon = '👑';
+    else if (role === 'admin') icon = '🎧';
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+      <defs>
+        <linearGradient id="grad_${initial}" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${bg1}" />
+          <stop offset="100%" stop-color="${bg2}" />
+        </linearGradient>
+      </defs>
+      <circle cx="50" cy="50" r="48" fill="url(#grad_${initial})" stroke="rgba(255,255,255,0.25)" stroke-width="3" />
+      <text x="50" y="54" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="40" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="central">${initial}</text>
+      <circle cx="76" cy="76" r="18" fill="#1e293b" stroke="#ffffff" stroke-width="2" />
+      <text x="76" y="76" font-size="15" text-anchor="middle" dominant-baseline="central">${icon}</text>
+    </svg>`;
+
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  }
+
   function renderAdminSelectorDropdown() {
     if (!adminOptionList) return;
     adminOptionList.innerHTML = '';
@@ -835,14 +869,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const isSel = selectedTargetAdmin === adm.username;
       itemDiv.className = `admin-option-item ${isSel ? 'selected' : ''}`;
       const roleLabel = adm.role === 'super_admin' ? '主管理' : '客服';
+      const displayName = adm.displayName || adm.username;
       itemDiv.innerHTML = `
         <div class="admin-option-info">
+          <img src="${createAvatarSvg(displayName, adm.role)}" class="user-avatar-img sm" style="margin-right: 6px;" />
           <span class="status-dot ${adm.online ? 'online' : ''}"></span>
-          <span>${escapeHTML(adm.username)}</span>
+          <span>${escapeHTML(displayName)}</span>
         </div>
         <span style="font-size:11px; color:${adm.online ? 'var(--accent-cyan)' : 'var(--text-dim)'};">${roleLabel} (${adm.online ? '在线' : '离线'})</span>
       `;
-      itemDiv.addEventListener('click', () => selectTargetAdmin(adm.username, `专属客服: ${adm.username}`));
+      itemDiv.addEventListener('click', () => selectTargetAdmin(adm.username, `专属客服: ${displayName}`));
       adminOptionList.appendChild(itemDiv);
     });
   }
@@ -1113,9 +1149,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnAdminManageUsers) {
       if (currentAdminRole === 'super_admin') {
         btnAdminManageUsers.style.display = 'inline-flex';
+        btnAdminManageUsers.addEventListener('click', () => {
+          if (adminManagementModal) {
+            adminManagementModal.classList.remove('hidden');
+            fetchAdminAccountsList();
+          }
+        });
       } else {
         btnAdminManageUsers.style.display = 'none';
       }
+    }
+
+    if (btnCloseAdminModal) {
+      btnCloseAdminModal.addEventListener('click', () => {
+        if (adminManagementModal) adminManagementModal.classList.add('hidden');
+      });
     }
 
     updateAdminUsersMap(serverUsers);
@@ -1452,7 +1500,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     availableAdminsList.forEach(adm => {
       if (adm.username === currentAdminUsername) return;
-      if (filterText && !adm.username.toLowerCase().includes(filterText) && !(adm.role || '').toLowerCase().includes(filterText)) {
+      const displayName = adm.displayName || adm.username;
+      if (filterText && !displayName.toLowerCase().includes(filterText) && !adm.username.toLowerCase().includes(filterText) && !(adm.role || '').toLowerCase().includes(filterText)) {
         return;
       }
       const isSel = adminInternalTarget === adm.username;
@@ -1460,10 +1509,10 @@ document.addEventListener('DOMContentLoaded', () => {
       admDiv.className = `user-item ${isSel ? 'active' : ''}`;
       const isSuper = adm.role === 'super_admin';
       admDiv.innerHTML = `
-        <div class="user-avatar" style="background: ${isSuper ? 'linear-gradient(135deg, #f59e0b, #ef4444)' : 'linear-gradient(135deg, var(--primary), var(--accent-cyan))'};">👥</div>
+        <img src="${createAvatarSvg(displayName, adm.role)}" class="user-avatar-img" style="margin-right: 8px;" />
         <div class="user-info">
           <div class="user-header">
-            <span class="user-name">${escapeHTML(adm.username)}</span>
+            <span class="user-name">${escapeHTML(displayName)}</span>
             <span class="status-dot ${adm.online ? 'online' : ''}"></span>
           </div>
           <div class="user-reason">${isSuper ? '超级主管理' : '客服管理员'} (${adm.online ? '在线' : '离线'})</div>
@@ -1471,6 +1520,140 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
       admDiv.addEventListener('click', () => selectAdminInternalTarget(adm.username));
       adminTeamList.appendChild(admDiv);
+    });
+  }
+
+  function fetchAdminAccountsList() {
+    const profile = ChatStorageManager.getProfile();
+    const token = profile ? profile.adminToken : null;
+    fetch(formatApiUrl('/api/admin/list'), {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+    .then(r => r.json())
+    .then(res => {
+      if (res && res.success && Array.isArray(res.admins)) {
+        renderAdminAccountsList(res.admins);
+      }
+    })
+    .catch(err => console.error('[FETCH ADMIN ACCOUNTS ERROR]', err));
+  }
+
+  function renderAdminAccountsList(admins) {
+    if (!adminAccountsList) return;
+    adminAccountsList.innerHTML = '';
+
+    admins.forEach(adm => {
+      const tr = document.createElement('tr');
+      tr.className = 'admin-table-row';
+      const isSuper = adm.role === 'super_admin';
+      const currentName = adm.display_name || adm.username;
+
+      tr.innerHTML = `
+        <td style="padding: 10px 12px; font-weight: 600; color: var(--text-main); font-family: monospace;">
+          <img src="${createAvatarSvg(currentName, adm.role)}" class="user-avatar-img sm" style="vertical-align: middle; margin-right: 6px;" />
+          ${escapeHTML(adm.username)}
+        </td>
+        <td style="padding: 10px 12px;">
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="text" class="input-display-name" value="${escapeHTML(currentName)}" placeholder="输入显示名称" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 12px; width: 120px;">
+            <button type="button" class="btn-icon btn-save-name" style="padding: 4px 8px; font-size: 11px;">💾 保存</button>
+          </div>
+        </td>
+        <td style="padding: 10px 12px;">
+          <span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '超级主管理' : '客服管理员'}</span>
+        </td>
+        <td style="padding: 10px 12px; text-align: right;">
+          ${isSuper ? '<span style="font-size:11px; color:var(--text-dim);">不可删除</span>' : `<button type="button" class="btn-icon btn-danger btn-delete-admin" data-username="${escapeHTML(adm.username)}" style="padding: 4px 8px; font-size: 11px;">🗑️ 删除</button>`}
+        </td>
+      `;
+
+      const btnSave = tr.querySelector('.btn-save-name');
+      const inputName = tr.querySelector('.input-display-name');
+      btnSave.addEventListener('click', () => {
+        const newName = inputName.value.trim();
+        const profile = ChatStorageManager.getProfile();
+        const token = profile ? profile.adminToken : null;
+        fetch(formatApiUrl('/api/admin/update-display-name'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ username: adm.username, displayName: newName })
+        })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            alert(`已成功更新 ${adm.username} 的显示名称为 "${newName || adm.username}"`);
+            fetchAdminAccountsList();
+            fetchAdminListForUser();
+          } else {
+            alert('更新显示名称失败: ' + res.message);
+          }
+        });
+      });
+
+      const btnDelete = tr.querySelector('.btn-delete-admin');
+      if (btnDelete) {
+        btnDelete.addEventListener('click', () => {
+          if (confirm(`确定要删除管理员账号 (${adm.username}) 吗？`)) {
+            const profile = ChatStorageManager.getProfile();
+            const token = profile ? profile.adminToken : null;
+            fetch(formatApiUrl('/api/admin/delete'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ username: adm.username })
+            })
+            .then(r => r.json())
+            .then(res => {
+              if (res.success) {
+                alert(res.message || '已成功删除该账号');
+                fetchAdminAccountsList();
+                fetchAdminListForUser();
+              } else {
+                alert('删除失败: ' + res.message);
+              }
+            });
+          }
+        });
+      }
+
+      adminAccountsList.appendChild(tr);
+    });
+  }
+
+  if (createAdminForm) {
+    createAdminForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const username = newAdminUsername ? newAdminUsername.value.trim() : '';
+      const password = newAdminPassword ? newAdminPassword.value.trim() : '';
+      if (!username || !password) return alert('请填写完整的用户名和密码');
+
+      const profile = ChatStorageManager.getProfile();
+      const token = profile ? profile.adminToken : null;
+      fetch(formatApiUrl('/api/admin/create'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ username, password })
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          alert(`🎉 成功创建客服管理员账号: ${username}`);
+          newAdminUsername.value = '';
+          newAdminPassword.value = '';
+          fetchAdminAccountsList();
+          fetchAdminListForUser();
+        } else {
+          alert('创建失败: ' + res.message);
+        }
+      });
     });
   }
 

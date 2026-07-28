@@ -359,6 +359,24 @@ app.post('/api/admin/delete', superAdminAuthMiddleware, (req, res) => {
   }
 });
 
+// REST API: Update Admin Display Name (Super Admin Only)
+app.post('/api/admin/update-display-name', superAdminAuthMiddleware, (req, res) => {
+  try {
+    const { username, displayName } = req.body;
+    if (!username) {
+      return res.status(400).json({ success: false, message: '缺少要更新的管理员用户名' });
+    }
+    const cleanUser = username.trim();
+    const cleanName = (displayName || '').trim();
+    ChatDatabase.updateAdminDisplayName(cleanUser, cleanName);
+
+    broadcastAdminStatusToUsers();
+    res.json({ success: true, message: '已更新管理员显示名称' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // REST API: Public Get Available Admins (for user support selector)
 app.get('/api/admins', (req, res) => {
   try {
@@ -423,6 +441,7 @@ function getAdminListWithStatus() {
       const isOnline = Boolean(activeSession && activeSession.sockets && activeSession.sockets.size > 0);
       return {
         username: a.username,
+        displayName: a.display_name || a.username,
         role: a.role,
         online: isOnline,
         lastLogin: a.last_login || a.created_at

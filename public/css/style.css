@@ -370,6 +370,27 @@ body {
   border-radius: 10px;
 }
 
+/* Generative Avatar System */
+.user-avatar-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+}
+
+.user-avatar-img.sm {
+  width: 28px;
+  height: 28px;
+}
+
+.user-avatar-img.lg {
+  width: 44px;
+  height: 44px;
+}
+
 .badge-unread.hidden {
   display: none !important;
 }
