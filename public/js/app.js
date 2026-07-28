@@ -42,9 +42,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminLoginForm = document.getElementById('admin-login-form');
   const inputNickname = document.getElementById('input-nickname');
   const inputReason = document.getElementById('input-reason');
-  const inputAdminKey = document.getElementById('input-admin-key');
+  const inputAdminUsername = document.getElementById('input-admin-username');
+  const inputAdminPassword = document.getElementById('input-admin-password');
   const loginError = document.getElementById('login-error');
   const errorText = document.getElementById('error-text');
+  let currentAdminRole = null;
+  let currentAdminUsername = null;
 
   // DOM Elements - User View
   const userView = document.getElementById('user-view');
@@ -64,6 +67,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminStatusDot = document.getElementById('admin-status-dot');
   const adminStatusText = document.getElementById('admin-status-text');
   const userTypingStatus = document.getElementById('user-typing-status');
+  const btnToggleAdminSelector = document.getElementById('btn-toggle-admin-selector');
+  const currentTargetAdminName = document.getElementById('current-target-admin-name');
+  const adminSelectorDropdown = document.getElementById('admin-selector-dropdown');
+  const adminOptionList = document.getElementById('admin-option-list');
+  const adminStatusLabel = document.getElementById('admin-status-label');
+  const currentTargetAvatar = document.getElementById('current-target-avatar');
+
+  let selectedTargetAdmin = 'all';
+  let availableAdminsList = [];
 
   // DOM Elements - Admin View
   const adminView = document.getElementById('admin-view');
@@ -90,11 +102,30 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminTargetReasonBar = document.getElementById('admin-target-reason-bar');
   const adminTargetReasonText = document.getElementById('admin-target-reason-text');
   const adminTypingStatus = document.getElementById('admin-typing-status');
+  const btnAdminManageUsers = document.getElementById('btn-admin-manage-users');
+  const adminRoleBadge = document.getElementById('admin-role-badge');
+  const adminManagementModal = document.getElementById('admin-management-modal');
+  const btnCloseAdminModal = document.getElementById('btn-close-admin-modal');
+  const createAdminForm = document.getElementById('create-admin-form');
+  const newAdminUsername = document.getElementById('new-admin-username');
+  const newAdminPassword = document.getElementById('new-admin-password');
+  const adminAccountsList = document.getElementById('admin-accounts-list');
   const btnToggleUserHistory = document.getElementById('btn-toggle-user-history');
   const adminUserHistoryPanel = document.getElementById('admin-user-history-panel');
   const historyNicknamesText = document.getElementById('history-nicknames-text');
   const historyIpsText = document.getElementById('history-ips-text');
   const btnMobileBackUsers = document.getElementById('btn-mobile-back-users');
+
+  // DOM Elements - Admin Team Sidebar Tabs
+  const adminTabCustomers = document.getElementById('admin-tab-customers');
+  const adminTabTeam = document.getElementById('admin-tab-team');
+  const teamUnreadBadge = document.getElementById('team-unread-badge');
+  const adminTeamList = document.getElementById('admin-team-list');
+
+  let adminActiveSidebarTab = 'customers'; // 'customers' | 'team'
+  let adminInternalTarget = 'ALL'; // 'ALL' | username
+  let allAdminInternalMessages = [];
+  let teamUnreadCount = 0;
 
   // DOM Elements - Context Menu
   const adminContextMenu = document.getElementById('admin-context-menu');
@@ -326,19 +357,24 @@ document.addEventListener('DOMContentLoaded', () => {
         clientId: myDeviceId 
       }, (res) => {
         if (res) {
-          if (typeof res.adminOnline === 'boolean') {
-            updateAdminStatusUI(res.adminOnline);
-          }
+          updateAdminStatusUI(res);
           if (res.historyMessages) {
             syncUserOfflineMessages(res.historyMessages);
           }
         }
       });
-    } else if (currentRole === 'admin' && currentAdminKey) {
-      socket.emit('join-admin', { secretKey: currentAdminKey }, (res) => {
+    } else if (currentRole === 'admin') {
+      const existingProfile = ChatStorageManager.getProfile();
+      const token = existingProfile ? existingProfile.adminToken : null;
+      socket.emit('join-admin', { token, username: currentAdminUsername }, (res) => {
         if (res && res.success) {
+          currentAdminUsername = res.username;
+          currentAdminRole = res.role;
           if (res.allMessages) {
             syncAdminOfflineMessages(res.allMessages);
+          }
+          if (res.internalMessages) {
+            allAdminInternalMessages = res.internalMessages;
           }
           if (res.users) {
             updateAdminUsersMap(res.users);
@@ -347,6 +383,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+  });
+
+  socket.on('admin-force-logout', ({ message }) => {
+    alert(message || '您的管理员账号已被主管理注销/断开连接');
+    ChatStorageManager.clearProfile();
+    location.reload();
   });
 
   window.addEventListener('beforeunload', () => {
@@ -437,14 +479,24 @@ document.addEventListener('DOMContentLoaded', () => {
     tabAdminRole.style.display = 'inline-flex';
     tabUserRole.style.width = 'auto';
     tabAdminRole.click();
-    showError('🎉 管理员暗号已触发！请输入管理员密码登录');
-    inputAdminKey.focus();
+    showError('🎉 管理员暗号已触发！请输入管理员账号与密码登录');
+    if (inputAdminUsername && !inputAdminUsername.value) {
+      inputAdminUsername.focus();
+    } else if (inputAdminPassword) {
+      inputAdminPassword.focus();
+    }
     keySequence = '';
   }
 
   // =========================================================================
   // Initial Local Storage Check
   // =========================================================================
+  const lastUserInfo = ChatStorageManager.getLastUserInfo();
+  if (lastUserInfo) {
+    if (lastUserInfo.nickname && inputNickname) inputNickname.value = lastUserInfo.nickname;
+    if (lastUserInfo.reason && inputReason) inputReason.value = lastUserInfo.reason;
+  }
+
   const savedProfile = ChatStorageManager.getProfile();
   if (savedProfile) {
     if (savedProfile.role === 'user' && savedProfile.nickname && savedProfile.reason) {
@@ -458,20 +510,36 @@ document.addEventListener('DOMContentLoaded', () => {
         clientId: myDeviceId 
       }, (joinRes) => {
         if (joinRes && joinRes.success) {
-          if (typeof joinRes.adminOnline === 'boolean') updateAdminStatusUI(joinRes.adminOnline);
+          updateAdminStatusUI(joinRes);
           if (joinRes.historyMessages) syncUserOfflineMessages(joinRes.historyMessages);
           initUserView();
         }
       });
-    } else if (savedProfile.role === 'admin' && savedProfile.adminKey) {
-      inputAdminKey.value = savedProfile.adminKey;
+    } else if (savedProfile.role === 'admin' && (savedProfile.adminToken || savedProfile.adminKey)) {
       currentRole = 'admin';
-      currentAdminKey = savedProfile.adminKey;
+      currentAdminUsername = savedProfile.adminUsername || 'admin';
+      currentAdminRole = savedProfile.adminRole || 'super_admin';
+      if (inputAdminUsername) inputAdminUsername.value = currentAdminUsername;
       revealAdminLogin();
-      socket.emit('join-admin', { secretKey: savedProfile.adminKey }, (res) => {
+      socket.emit('join-admin', {
+        token: savedProfile.adminToken,
+        secretKey: savedProfile.adminKey,
+        username: currentAdminUsername
+      }, (res) => {
         if (res && res.success) {
+          currentAdminUsername = res.username;
+          currentAdminRole = res.role;
+          ChatStorageManager.saveProfile({
+            role: 'admin',
+            adminUsername: res.username,
+            adminRole: res.role,
+            adminToken: res.token
+          });
           if (res.allMessages) syncAdminOfflineMessages(res.allMessages);
+          if (res.internalMessages) allAdminInternalMessages = res.internalMessages;
           initAdminView(res.users || []);
+        } else {
+          showError((res && res.message) || '管理员身份凭证已失效，请重新输入密码登录');
         }
       });
     }
@@ -614,9 +682,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userProfile = { nickname, reason, deviceId: myDeviceId };
         ChatStorageManager.saveProfile({ role: 'user', nickname, reason, deviceId: myDeviceId });
 
-        if (typeof joinRes.adminOnline === 'boolean') {
-          updateAdminStatusUI(joinRes.adminOnline);
-        }
+        updateAdminStatusUI(joinRes);
 
         if (joinRes.historyMessages) {
           syncUserOfflineMessages(joinRes.historyMessages);
@@ -634,9 +700,10 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     hideError();
 
-    const secretKey = inputAdminKey.value.trim();
-    if (!secretKey) {
-      return showError('请输入管理员密钥');
+    const username = inputAdminUsername ? inputAdminUsername.value.trim() : '';
+    const password = inputAdminPassword ? inputAdminPassword.value.trim() : '';
+    if (!username || !password) {
+      return showError('请输入管理员账号与密码');
     }
 
     if (!socket || !socket.connected) {
@@ -660,14 +727,11 @@ document.addEventListener('DOMContentLoaded', () => {
           btnSubmit.disabled = false;
           btnSubmit.innerHTML = originalText;
         }
-        showError('登录响应超时，请检查管理员密钥或网络状态后重试');
+        showError('登录响应超时，请检查密码或网络状态后重试');
       }
     }, 4000);
 
-    const existingProfile = ChatStorageManager.getProfile();
-    const savedToken = existingProfile ? existingProfile.adminToken : null;
-
-    socket.emit('join-admin', { secretKey, token: savedToken }, (res) => {
+    socket.emit('join-admin', { username, password }, (res) => {
       if (isResponded) return;
       isResponded = true;
       clearTimeout(timeoutTimer);
@@ -678,15 +742,24 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (!res || !res.success) {
-        return showError((res && res.message) || '管理员密码错误');
+        return showError((res && res.message) || '管理员账号或密码错误');
       }
 
       currentRole = 'admin';
-      currentAdminKey = secretKey;
-      ChatStorageManager.saveProfile({ role: 'admin', adminKey: secretKey, adminToken: res.token });
+      currentAdminUsername = res.username;
+      currentAdminRole = res.role;
+      ChatStorageManager.saveProfile({
+        role: 'admin',
+        adminUsername: res.username,
+        adminRole: res.role,
+        adminToken: res.token
+      });
 
       if (res.allMessages) {
         syncAdminOfflineMessages(res.allMessages);
+      }
+      if (res.internalMessages) {
+        allAdminInternalMessages = res.internalMessages;
       }
 
       initAdminView(res.users || []);
@@ -695,6 +768,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   btnUserLogout.addEventListener('click', () => {
     if (currentRole === 'user') {
+      if (userProfile && (userProfile.nickname || userProfile.reason)) {
+        ChatStorageManager.saveLastUserInfo(userProfile.nickname, userProfile.reason);
+      }
       socket.emit('leave-user');
     }
     ChatStorageManager.clearProfile();
@@ -709,15 +785,102 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // User View Logic
   // =========================================================================
-  function updateAdminStatusUI(isOnline) {
-    if (isOnline) {
-      adminStatusDot.className = 'status-dot online';
-      adminStatusText.querySelector('span:last-child').textContent = '在线中';
-    } else {
-      adminStatusDot.className = 'status-dot';
-      adminStatusText.querySelector('span:last-child').textContent = '已离线 (有疑问可留言)';
+  function updateAdminStatusUI(data) {
+    let isOnline = false;
+    if (typeof data === 'boolean') {
+      isOnline = data;
+    } else if (data && typeof data === 'object') {
+      isOnline = Boolean(data.online);
+      if (Array.isArray(data.adminList)) {
+        availableAdminsList = data.adminList;
+      }
     }
+
+    if (adminStatusDot) adminStatusDot.className = isOnline ? 'status-dot online' : 'status-dot';
+    if (adminStatusLabel) adminStatusLabel.textContent = isOnline ? '客服团队在线中' : '客服已离线 (有疑问可留言)';
+
+    renderAdminSelectorDropdown();
   }
+
+  function renderAdminSelectorDropdown() {
+    if (!adminOptionList) return;
+    adminOptionList.innerHTML = '';
+
+    const autoDiv = document.createElement('div');
+    const isAutoSel = selectedTargetAdmin === 'all';
+    const anyOnline = availableAdminsList.some(a => a.online);
+    autoDiv.className = `admin-option-item ${isAutoSel ? 'selected' : ''}`;
+    autoDiv.innerHTML = `
+      <div class="admin-option-info">
+        <span class="status-dot ${anyOnline ? 'online' : ''}"></span>
+        <span>在线客服团队 (自动推荐)</span>
+      </div>
+      <span style="font-size:11px; color:var(--text-dim);">默认推荐</span>
+    `;
+    autoDiv.addEventListener('click', () => selectTargetAdmin('all', '在线客服团队 (自动)'));
+    adminOptionList.appendChild(autoDiv);
+
+    availableAdminsList.forEach(adm => {
+      const itemDiv = document.createElement('div');
+      const isSel = selectedTargetAdmin === adm.username;
+      itemDiv.className = `admin-option-item ${isSel ? 'selected' : ''}`;
+      const roleLabel = adm.role === 'super_admin' ? '主管理' : '客服';
+      itemDiv.innerHTML = `
+        <div class="admin-option-info">
+          <span class="status-dot ${adm.online ? 'online' : ''}"></span>
+          <span>${escapeHTML(adm.username)}</span>
+        </div>
+        <span style="font-size:11px; color:${adm.online ? 'var(--accent-cyan)' : 'var(--text-dim)'};">${roleLabel} (${adm.online ? '在线' : '离线'})</span>
+      `;
+      itemDiv.addEventListener('click', () => selectTargetAdmin(adm.username, `专属客服: ${adm.username}`));
+      adminOptionList.appendChild(itemDiv);
+    });
+  }
+
+  function selectTargetAdmin(username, displayName) {
+    selectedTargetAdmin = username;
+    if (currentTargetAdminName) currentTargetAdminName.textContent = displayName;
+    if (currentTargetAvatar) currentTargetAvatar.textContent = username === 'all' ? '🎧' : '👤';
+    if (adminSelectorDropdown) adminSelectorDropdown.classList.add('hidden');
+    renderAdminSelectorDropdown();
+  }
+
+  function fetchAdminListForUser() {
+    if (socket && socket.connected) {
+      socket.emit('get-admin-list', (res) => {
+        if (res && res.adminList) {
+          updateAdminStatusUI(res);
+        }
+      });
+    }
+    fetch(formatApiUrl('/api/admins'))
+      .then(r => r.json())
+      .then(res => {
+        if (res && res.success && Array.isArray(res.adminList)) {
+          updateAdminStatusUI(res);
+        }
+      })
+      .catch(err => console.error('[FETCH ADMINS ERROR]', err));
+  }
+
+  if (btnToggleAdminSelector) {
+    btnToggleAdminSelector.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (adminSelectorDropdown) {
+        const isOpening = adminSelectorDropdown.classList.contains('hidden');
+        adminSelectorDropdown.classList.toggle('hidden');
+        if (isOpening) {
+          fetchAdminListForUser();
+        }
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (adminSelectorDropdown && !adminSelectorDropdown.contains(e.target) && btnToggleAdminSelector && !btnToggleAdminSelector.contains(e.target)) {
+      adminSelectorDropdown.classList.add('hidden');
+    }
+  });
 
   function initUserView() {
     modalOverlay.classList.add('hidden');
@@ -728,6 +891,7 @@ document.addEventListener('DOMContentLoaded', () => {
     userIdentityTag.title = `当前用户昵称: ${userProfile.nickname}`;
     userReasonDisplay.textContent = userProfile.reason;
 
+    fetchAdminListForUser();
     renderUserMessages();
 
     // User Text input Enter listener
@@ -801,7 +965,8 @@ document.addEventListener('DOMContentLoaded', () => {
       msgType: 'text',
       text: text,
       timestamp: new Date().toISOString(),
-      senderRole: 'user'
+      senderRole: 'user',
+      targetAdminUsername: selectedTargetAdmin === 'all' ? null : selectedTargetAdmin
     };
 
     ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
@@ -819,7 +984,8 @@ document.addEventListener('DOMContentLoaded', () => {
       msgType: 'image',
       text: imageDataUrl,
       timestamp: new Date().toISOString(),
-      senderRole: 'user'
+      senderRole: 'user',
+      targetAdminUsername: selectedTargetAdmin === 'all' ? null : selectedTargetAdmin
     };
 
     ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
@@ -829,8 +995,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Socket: Admin Status Change -> User View
-  socket.on('admin-status-change', ({ online }) => {
-    updateAdminStatusUI(online);
+  socket.on('admin-status-change', (data) => {
+    updateAdminStatusUI(data);
   });
 
   // Socket: Incoming Admin Message -> User View
@@ -873,6 +1039,30 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Socket: Incoming Admin Internal Message -> Admin View
+  socket.on('new-admin-internal-message', (msgObj) => {
+    if (currentRole !== 'admin') return;
+
+    if (!allAdminInternalMessages.some(m => m.id === msgObj.id)) {
+      allAdminInternalMessages.push(msgObj);
+    }
+
+    if (adminActiveSidebarTab === 'team') {
+      renderAdminInternalChat();
+    } else {
+      playNotificationSound();
+      teamUnreadCount++;
+      if (teamUnreadBadge) {
+        teamUnreadBadge.textContent = teamUnreadCount;
+        teamUnreadBadge.classList.remove('hidden');
+      }
+      sendDesktopNotification(`👥 来自管理员 ${msgObj.senderUsername} 的内部消息`, {
+        body: msgObj.text,
+        tag: 'internal-msg'
+      });
+    }
+  });
+
   
   
 
@@ -884,8 +1074,53 @@ document.addEventListener('DOMContentLoaded', () => {
     adminView.classList.remove('hidden');
     userView.classList.add('hidden');
 
+    if (adminRoleBadge) {
+      if (currentAdminRole === 'super_admin') {
+        adminRoleBadge.textContent = '超级主管理';
+        adminRoleBadge.classList.add('super');
+      } else {
+        adminRoleBadge.textContent = '客服管理员';
+        adminRoleBadge.classList.remove('super');
+      }
+    }
+
+    if (btnAdminManageUsers) {
+      if (currentAdminRole === 'super_admin') {
+        btnAdminManageUsers.style.display = 'inline-flex';
+      } else {
+        btnAdminManageUsers.style.display = 'none';
+      }
+    }
+
     updateAdminUsersMap(serverUsers);
     renderAdminUserList();
+
+    if (adminTabCustomers) {
+      adminTabCustomers.addEventListener('click', () => {
+        adminActiveSidebarTab = 'customers';
+        adminTabCustomers.classList.add('active');
+        if (adminTabTeam) adminTabTeam.classList.remove('active');
+        if (adminUserList) adminUserList.classList.remove('hidden');
+        if (adminTeamList) adminTeamList.classList.add('hidden');
+        if (adminSelectedClientId) {
+          selectUserForAdmin(adminSelectedClientId);
+        }
+      });
+    }
+
+    if (adminTabTeam) {
+      adminTabTeam.addEventListener('click', () => {
+        adminActiveSidebarTab = 'team';
+        adminTabTeam.classList.add('active');
+        if (adminTabCustomers) adminTabCustomers.classList.remove('active');
+        if (adminTeamList) adminTeamList.classList.remove('hidden');
+        if (adminUserList) adminUserList.classList.add('hidden');
+        teamUnreadCount = 0;
+        if (teamUnreadBadge) teamUnreadBadge.classList.add('hidden');
+        renderAdminTeamList();
+        selectAdminInternalTarget(adminInternalTarget);
+      });
+    }
 
     // Auto-select user with highest unread or first available user if none selected
     if (!adminSelectedClientId && allAdminUsersMap.size > 0) {
@@ -1111,9 +1346,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function sendAdminMessage() {
-    if (!adminSelectedClientId) return;
     const text = adminInput.value.trim();
     if (!text) return;
+
+    if (adminActiveSidebarTab === 'team') {
+      const msgObj = {
+        id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+        senderUsername: currentAdminUsername,
+        receiverUsername: adminInternalTarget,
+        text: text,
+        timestamp: new Date().toISOString()
+      };
+
+      socket.emit('admin-internal-message', msgObj);
+      adminInput.value = '';
+      return;
+    }
+
+    if (!adminSelectedClientId) return;
 
     const userObj = allAdminUsersMap.get(adminSelectedClientId);
 
@@ -1134,6 +1384,116 @@ document.addEventListener('DOMContentLoaded', () => {
     adminInput.value = '';
 
     socket.emit('admin-message', msgObj);
+  }
+
+  function renderAdminTeamList() {
+    if (!adminTeamList) return;
+    adminTeamList.innerHTML = '';
+
+    const hallDiv = document.createElement('div');
+    const isHallSel = adminInternalTarget === 'ALL';
+    hallDiv.className = `user-item ${isHallSel ? 'active' : ''}`;
+    const anyOnline = availableAdminsList.some(a => a.online);
+    hallDiv.innerHTML = `
+      <div class="user-avatar" style="background: linear-gradient(135deg, #8b5cf6, #ec4899);">📢</div>
+      <div class="user-info">
+        <div class="user-header">
+          <span class="user-name">团队内部大厅 (全员频道)</span>
+          <span class="admin-internal-tag">内部</span>
+        </div>
+        <div class="user-reason">管理员团队公共内部群聊</div>
+      </div>
+    `;
+    hallDiv.addEventListener('click', () => selectAdminInternalTarget('ALL'));
+    adminTeamList.appendChild(hallDiv);
+
+    availableAdminsList.forEach(adm => {
+      if (adm.username === currentAdminUsername) return;
+      const isSel = adminInternalTarget === adm.username;
+      const admDiv = document.createElement('div');
+      admDiv.className = `user-item ${isSel ? 'active' : ''}`;
+      const isSuper = adm.role === 'super_admin';
+      admDiv.innerHTML = `
+        <div class="user-avatar" style="background: ${isSuper ? 'linear-gradient(135deg, #f59e0b, #ef4444)' : 'linear-gradient(135deg, var(--primary), var(--accent-cyan))'};">👥</div>
+        <div class="user-info">
+          <div class="user-header">
+            <span class="user-name">${escapeHTML(adm.username)}</span>
+            <span class="status-dot ${adm.online ? 'online' : ''}"></span>
+          </div>
+          <div class="user-reason">${isSuper ? '超级主管理' : '客服管理员'} (${adm.online ? '在线' : '离线'})</div>
+        </div>
+      `;
+      admDiv.addEventListener('click', () => selectAdminInternalTarget(adm.username));
+      adminTeamList.appendChild(admDiv);
+    });
+  }
+
+  function selectAdminInternalTarget(targetUsername) {
+    adminInternalTarget = targetUsername;
+    renderAdminTeamList();
+
+    if (adminView) adminView.classList.add('mobile-show-chat');
+
+    if (targetUsername === 'ALL') {
+      adminTargetNickname.innerHTML = `📢 团队内部大厅 <span class="admin-internal-tag">内部全员</span>`;
+      adminTargetStatus.textContent = '管理员团队全员实时公共频道';
+      adminTargetAvatar.textContent = '📢';
+      adminTargetAvatar.style.background = 'linear-gradient(135deg, #8b5cf6, #ec4899)';
+    } else {
+      adminTargetNickname.innerHTML = `👥 内部私聊: ${escapeHTML(targetUsername)} <span class="admin-internal-tag">专属沟通</span>`;
+      const admObj = availableAdminsList.find(a => a.username === targetUsername);
+      const isOnline = admObj ? admObj.online : false;
+      adminTargetStatus.textContent = `管理员内部私聊 (${isOnline ? '🟢 在线' : '⚪ 离线'})`;
+      adminTargetAvatar.textContent = '👥';
+      adminTargetAvatar.style.background = 'linear-gradient(135deg, var(--primary), var(--accent-cyan))';
+    }
+
+    adminTargetReasonBar.style.display = 'none';
+    btnClearTargetChat.style.display = 'none';
+
+    adminInput.disabled = false;
+    btnAdminSend.disabled = false;
+    btnAdminImage.disabled = false;
+    if (btnAdminFile) btnAdminFile.disabled = false;
+
+    renderAdminInternalChat();
+  }
+
+  function renderAdminInternalChat() {
+    if (adminActiveSidebarTab !== 'team') return;
+    adminMessagesContainer.innerHTML = '';
+
+    const filtered = allAdminInternalMessages.filter(m => {
+      if (adminInternalTarget === 'ALL') {
+        return m.receiverUsername === 'ALL';
+      } else {
+        return (m.senderUsername === adminInternalTarget && m.receiverUsername === currentAdminUsername) ||
+               (m.senderUsername === currentAdminUsername && m.receiverUsername === adminInternalTarget);
+      }
+    });
+
+    if (filtered.length === 0) {
+      adminMessagesContainer.innerHTML = `
+        <div class="empty-placeholder">
+          <div class="icon">👥</div>
+          <p>暂无内部沟通记录，主动发一条消息吧！</p>
+        </div>`;
+      return;
+    }
+
+    filtered.forEach(m => {
+      const isSelf = m.senderUsername === currentAdminUsername;
+      const msgObj = {
+        id: m.id,
+        fromNickname: isSelf ? `${m.senderUsername} (我)` : m.senderUsername,
+        text: m.text,
+        timestamp: m.timestamp,
+        senderRole: 'admin'
+      };
+      appendMessageBubble(adminMessagesContainer, msgObj, isSelf);
+    });
+
+    scrollToBottom(adminMessagesContainer);
   }
 
   function sendAdminImageMessage(imageDataUrl) {
@@ -1696,6 +2056,131 @@ document.addEventListener('DOMContentLoaded', () => {
 
           renderAdminUserList();
         }
+      }
+    });
+  }
+
+  // =========================================================================
+  // Super Admin Sub-Admin Management Logic
+  // =========================================================================
+  async function fetchAndRenderAdminAccounts() {
+    const profile = ChatStorageManager.getProfile();
+    const token = profile ? profile.adminToken : '';
+    try {
+      const resp = await fetch(formatApiUrl('/api/admin/list'), {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await resp.json();
+      if (data.success) {
+        renderAdminAccountsTable(data.admins || []);
+      } else {
+        alert(data.message || '获取管理员列表失败');
+      }
+    } catch (err) {
+      alert('加载管理员列表失败: ' + err.message);
+    }
+  }
+
+  function renderAdminAccountsTable(admins) {
+    if (!adminAccountsList) return;
+    adminAccountsList.innerHTML = '';
+    if (admins.length === 0) {
+      adminAccountsList.innerHTML = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: var(--text-dim);">暂无管理员账号</td></tr>`;
+      return;
+    }
+
+    admins.forEach(adm => {
+      const tr = document.createElement('tr');
+      tr.className = 'admin-table-row';
+      const isSuper = adm.role === 'super_admin';
+      const dateStr = adm.created_at ? formatTime(adm.created_at) : '-';
+      tr.innerHTML = `
+        <td style="padding: 10px 12px; font-weight: 600;">${escapeHTML(adm.username)}</td>
+        <td style="padding: 10px 12px;"><span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '主管理' : '普通客服'}</span></td>
+        <td style="padding: 10px 12px; color: var(--text-dim); font-size: 12px;">${dateStr}</td>
+        <td style="padding: 10px 12px; text-align: right;">
+          ${isSuper ? '<span style="font-size:11px; color:var(--text-dim);">不可删除</span>' : `<button type="button" class="btn-icon btn-danger btn-delete-adm" data-user="${escapeHTML(adm.username)}" style="padding: 3px 8px; font-size: 11px;">🗑️ 删除</button>`}
+        </td>
+      `;
+      adminAccountsList.appendChild(tr);
+    });
+
+    adminAccountsList.querySelectorAll('.btn-delete-adm').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const targetUser = btn.dataset.user;
+        if (confirm(`确定要注销并删除管理员账号 (${targetUser}) 吗？`)) {
+          await deleteAdminAccount(targetUser);
+        }
+      });
+    });
+  }
+
+  async function deleteAdminAccount(username) {
+    const profile = ChatStorageManager.getProfile();
+    const token = profile ? profile.adminToken : '';
+    try {
+      const resp = await fetch(formatApiUrl('/api/admin/delete'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ username })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        fetchAndRenderAdminAccounts();
+      } else {
+        alert(data.message || '删除管理员失败');
+      }
+    } catch (err) {
+      alert('操作失败: ' + err.message);
+    }
+  }
+
+  if (btnAdminManageUsers) {
+    btnAdminManageUsers.addEventListener('click', () => {
+      if (adminManagementModal) {
+        adminManagementModal.classList.remove('hidden');
+        fetchAndRenderAdminAccounts();
+      }
+    });
+  }
+
+  if (btnCloseAdminModal) {
+    btnCloseAdminModal.addEventListener('click', () => {
+      if (adminManagementModal) adminManagementModal.classList.add('hidden');
+    });
+  }
+
+  if (createAdminForm) {
+    createAdminForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = newAdminUsername ? newAdminUsername.value.trim() : '';
+      const password = newAdminPassword ? newAdminPassword.value.trim() : '';
+      if (!username || !password) return alert('用户名与密码均不能为空');
+
+      const profile = ChatStorageManager.getProfile();
+      const token = profile ? profile.adminToken : '';
+      try {
+        const resp = await fetch(formatApiUrl('/api/admin/create'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await resp.json();
+        if (data.success) {
+          if (newAdminUsername) newAdminUsername.value = '';
+          if (newAdminPassword) newAdminPassword.value = '';
+          fetchAndRenderAdminAccounts();
+        } else {
+          alert(data.message || '创建管理员账号失败');
+        }
+      } catch (err) {
+        alert('创建失败: ' + err.message);
       }
     });
   }

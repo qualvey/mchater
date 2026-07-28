@@ -1,11 +1,27 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
 
 const dbPath = path.join(__dirname, 'chat.db');
 const db = new Database(dbPath);
 
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
+
+// Password Hashing Helpers
+function hashPassword(password, salt) {
+  salt = salt || crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, originalHash] = storedHash.split(':');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === originalHash;
+}
 
 // Initialize Tables
 db.exec(`
@@ -40,7 +56,57 @@ db.exec(`
     text TEXT NOT NULL,
     timestamp TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS admins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    created_at TEXT NOT NULL,
+    last_login TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS admin_messages (
+    id TEXT PRIMARY KEY,
+    sender_username TEXT NOT NULL,
+    receiver_username TEXT NOT NULL,
+    text TEXT NOT NULL,
+    timestamp TEXT NOT NULL
+  );
 `);
+
+// Migration: Ensure target_admin column exists in messages table
+try {
+  const tableInfo = db.prepare("PRAGMA table_info(messages)").all();
+  const hasTargetAdmin = tableInfo.some(col => col.name === 'target_admin');
+  if (!hasTargetAdmin) {
+    db.prepare("ALTER TABLE messages ADD COLUMN target_admin TEXT;").run();
+    console.log("[DB MIGRATION] Added 'target_admin' column to 'messages' table.");
+  }
+} catch (e) {
+  console.error("[DB MIGRATION ERROR]", e);
+}
+
+// Seed default super admin if no admin exists
+const stmtGetAdminCount = db.prepare('SELECT COUNT(*) as count FROM admins');
+if (stmtGetAdminCount.get().count === 0) {
+  let defaultAdminKey = 'admin123';
+  try {
+    const cfgPath = path.join(__dirname, 'config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (cfg.adminKey) defaultAdminKey = cfg.adminKey;
+    }
+  } catch (e) {}
+
+  const now = new Date().toISOString();
+  const pwdHash = hashPassword(defaultAdminKey);
+  db.prepare(`
+    INSERT INTO admins (username, password_hash, role, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run('admin', pwdHash, 'super_admin', now);
+  console.log(`[DB INIT] Initialized default super admin 'admin' into SQLite.`);
+}
 
 // Prepared Statements
 const stmtGetUser = db.prepare('SELECT * FROM users WHERE client_id = ?');
@@ -69,8 +135,8 @@ const stmtInsertIPHistory = db.prepare(`
 const stmtGetIPHistory = db.prepare('SELECT ip_address, logged_in_at FROM ip_history WHERE client_id = ? ORDER BY id ASC');
 
 const stmtInsertMessage = db.prepare(`
-  INSERT OR IGNORE INTO messages (id, client_id, sender_role, sender_nickname, text, timestamp)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT OR IGNORE INTO messages (id, client_id, sender_role, sender_nickname, text, timestamp, target_admin)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
 `);
 const stmtGetMessages = db.prepare('SELECT * FROM messages WHERE client_id = ? ORDER BY timestamp ASC');
 
@@ -156,7 +222,8 @@ class ChatDatabase {
       msg.senderRole || 'user',
       msg.fromNickname || '未知',
       msg.text,
-      msg.timestamp || new Date().toISOString()
+      msg.timestamp || new Date().toISOString(),
+      msg.targetAdmin || msg.targetAdminUsername || null
     );
   }
 
@@ -168,7 +235,8 @@ class ChatDatabase {
       senderRole: m.sender_role,
       fromNickname: m.sender_nickname,
       text: m.text,
-      timestamp: m.timestamp
+      timestamp: m.timestamp,
+      targetAdmin: m.target_admin || null
     }));
   }
 
@@ -183,7 +251,8 @@ class ChatDatabase {
         senderRole: m.sender_role,
         fromNickname: m.sender_nickname,
         text: m.text,
-        timestamp: m.timestamp
+        timestamp: m.timestamp,
+        targetAdmin: m.target_admin || null
       });
     });
     return map;
@@ -206,6 +275,96 @@ class ChatDatabase {
     db.prepare('DELETE FROM users WHERE client_id = ?').run(clientId);
     db.prepare('DELETE FROM nickname_history WHERE client_id = ?').run(clientId);
     db.prepare('DELETE FROM ip_history WHERE client_id = ?').run(clientId);
+  }
+
+  // Admin Management Static Methods
+  static verifyAdminLogin(username, password) {
+    const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+    if (!admin) return null;
+    const isValid = verifyPassword(password, admin.password_hash);
+    if (!isValid) return null;
+
+    const now = new Date().toISOString();
+    db.prepare('UPDATE admins SET last_login = ? WHERE username = ?').run(now, username);
+    return {
+      id: admin.id,
+      username: admin.username,
+      role: admin.role,
+      createdAt: admin.created_at,
+      lastLogin: now
+    };
+  }
+
+  static getAdminByUsername(username) {
+    const admin = db.prepare('SELECT id, username, role, created_at, last_login FROM admins WHERE username = ?').get(username);
+    return admin || null;
+  }
+
+  static getAllAdmins() {
+    return db.prepare('SELECT id, username, role, created_at, last_login FROM admins ORDER BY id ASC').all();
+  }
+
+  static createAdmin(username, password, role = 'admin') {
+    const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username);
+    if (existing) {
+      throw new Error('管理员用户名已存在');
+    }
+    const pwdHash = hashPassword(password);
+    const now = new Date().toISOString();
+    const result = db.prepare(`
+      INSERT INTO admins (username, password_hash, role, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(username, pwdHash, role, now);
+    return {
+      id: result.lastInsertRowid,
+      username,
+      role,
+      createdAt: now
+    };
+  }
+
+  static deleteAdmin(username) {
+    const admin = db.prepare('SELECT role FROM admins WHERE username = ?').get(username);
+    if (!admin) {
+      throw new Error('管理员账号不存在');
+    }
+    if (admin.role === 'super_admin') {
+      throw new Error('禁止删除超级主管理账号');
+    }
+    db.prepare('DELETE FROM admins WHERE username = ?').run(username);
+    return true;
+  }
+
+  // Admin Internal Messages Persistence
+  static saveAdminInternalMessage(msg) {
+    db.prepare(`
+      INSERT OR IGNORE INTO admin_messages (id, sender_username, receiver_username, text, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      msg.id,
+      msg.senderUsername,
+      msg.receiverUsername || 'ALL',
+      msg.text,
+      msg.timestamp || new Date().toISOString()
+    );
+  }
+
+  static getAdminInternalMessages(username) {
+    const msgs = db.prepare(`
+      SELECT * FROM admin_messages
+      WHERE receiver_username = 'ALL'
+         OR receiver_username = ?
+         OR sender_username = ?
+      ORDER BY timestamp ASC
+    `).all(username, username);
+
+    return msgs.map(m => ({
+      id: m.id,
+      senderUsername: m.sender_username,
+      receiverUsername: m.receiver_username,
+      text: m.text,
+      timestamp: m.timestamp
+    }));
   }
 }
 

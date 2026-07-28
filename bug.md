@@ -6,7 +6,9 @@
 [x] 客户端发送文件，UI会显示待管理员审核。管理员侧没有响应。服务器无相关日志
 
 [x] 用户侧输入时，管理员侧显示用户正在输入。反之不工作
-
+[x] 存在多个管理员，用户只能看到自动推荐
 ## unfixed
 
 [x] 移动端模式下普通用户对话窗口被 CSS 全局规则平移出屏幕导致的页面空白问题
+[x] 修复 join-user 回调中残留 adminSockets.size 变量引发的 ReferenceError 崩溃问题
+[x] 修复 revealAdminLogin 中残留 inputAdminKey 引起的 ReferenceError 崩溃及旧 Session 鉴权无法自动恢复问题

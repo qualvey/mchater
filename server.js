@@ -21,25 +21,25 @@ app.use((req, res, next) => {
 // JWT Token Generator & Verifier
 const JWT_SECRET = crypto.randomBytes(32).toString('hex');
 
-function signAdminToken() {
+function signAdminToken(username, role = 'admin') {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ role: 'admin', exp: Date.now() + 24 * 3600 * 1000 })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ username, role, exp: Date.now() + 24 * 3600 * 1000 })).toString('base64url');
   const signature = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
   return `${header}.${payload}.${signature}`;
 }
 
 function verifyAdminToken(token) {
   try {
-    if (!token || typeof token !== 'string') return false;
+    if (!token || typeof token !== 'string') return null;
     const [header, payload, signature] = token.split('.');
-    if (!header || !payload || !signature) return false;
+    if (!header || !payload || !signature) return null;
     const expectedSig = crypto.createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
-    if (signature !== expectedSig) return false;
+    if (signature !== expectedSig) return null;
     const parsedPayload = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (parsedPayload.exp && Date.now() > parsedPayload.exp) return false;
-    return parsedPayload.role === 'admin';
+    if (parsedPayload.exp && Date.now() > parsedPayload.exp) return null;
+    return parsedPayload;
   } catch (e) {
-    return false;
+    return null;
   }
 }
 
@@ -107,7 +107,8 @@ const ADMIN_TRIGGER_CODE = process.env.ADMIN_TRIGGER_CODE || config.adminTrigger
 // Server state: Keyed by Client Device Fingerprint (clientId)
 // activeUsers: clientId -> { clientId, nickname, reason, joinedAt, sockets: Set<socketId>, online: boolean, lastSeen: ISOString }
 const activeUsers = new Map();
-const adminSockets = new Set();
+// activeAdminsMap: username -> { username, role, sockets: Set<socketId> }
+const activeAdminsMap = new Map();
 
 // Load persistent users from Database on startup
 try {
@@ -208,9 +209,7 @@ app.post('/api/upload', (req, res) => {
           });
         }
 
-        adminSockets.forEach(adminSocketId => {
-          io.to(adminSocketId).emit('file-upload-finished', payload);
-        });
+        sendToAllAdmins('file-upload-finished', payload);
       }
     }
 
@@ -218,6 +217,155 @@ app.post('/api/upload', (req, res) => {
   } catch (err) {
     console.error('[API UPLOAD ERROR]', err);
     return res.status(500).json({ success: false, message: '保存文件失败: ' + err.message });
+  }
+});
+
+// Admin REST API Middleware
+function adminAuthMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader ? authHeader.replace(/^Bearer\s+/, '') : (req.headers['x-admin-token'] || req.body.token || req.query.token);
+  const payload = verifyAdminToken(token);
+  if (!payload) {
+    return res.status(401).json({ success: false, message: '未授权或 Token 已过期，请重新登录' });
+  }
+  req.admin = payload;
+  next();
+}
+
+function superAdminAuthMiddleware(req, res, next) {
+  adminAuthMiddleware(req, res, () => {
+    if (req.admin.role !== 'super_admin') {
+      return res.status(403).json({ success: false, message: '权限不足：仅超级主管理可执行此操作' });
+    }
+    next();
+  });
+}
+
+// REST API: Admin Login
+app.post('/api/admin/login', (req, res) => {
+  try {
+    const { username, password, token } = req.body;
+
+    if (token) {
+      const verified = verifyAdminToken(token);
+      if (verified && verified.username) {
+        const dbAdmin = ChatDatabase.getAdminByUsername(verified.username);
+        if (dbAdmin) {
+          const newToken = signAdminToken(dbAdmin.username, dbAdmin.role);
+          return res.json({
+            success: true,
+            token: newToken,
+            username: dbAdmin.username,
+            role: dbAdmin.role
+          });
+        }
+      }
+    }
+
+    if (!username || !password) {
+      if (password === ADMIN_KEY || username === ADMIN_KEY) {
+        const superAdmin = ChatDatabase.getAdminByUsername('admin');
+        if (superAdmin) {
+          const newToken = signAdminToken(superAdmin.username, superAdmin.role);
+          return res.json({
+            success: true,
+            token: newToken,
+            username: superAdmin.username,
+            role: superAdmin.role
+          });
+        }
+      }
+      return res.status(400).json({ success: false, message: '请输入管理员账号与密码' });
+    }
+
+    const admin = ChatDatabase.verifyAdminLogin(username.trim(), password);
+    if (!admin) {
+      return res.status(401).json({ success: false, message: '管理员账号或密码错误' });
+    }
+
+    const newToken = signAdminToken(admin.username, admin.role);
+    res.json({
+      success: true,
+      token: newToken,
+      username: admin.username,
+      role: admin.role
+    });
+  } catch (err) {
+    console.error('[ADMIN LOGIN ERROR]', err);
+    res.status(500).json({ success: false, message: '服务端异常: ' + err.message });
+  }
+});
+
+// REST API: Get All Admins (Super Admin Only)
+app.get('/api/admin/list', superAdminAuthMiddleware, (req, res) => {
+  try {
+    const admins = ChatDatabase.getAllAdmins();
+    res.json({ success: true, admins });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// REST API: Create Sub-Admin (Super Admin Only)
+app.post('/api/admin/create', superAdminAuthMiddleware, (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: '用户名和密码不能为空' });
+    }
+    const cleanUser = username.trim();
+    if (cleanUser.length < 3 || cleanUser.length > 20) {
+      return res.status(400).json({ success: false, message: '用户名长度需在 3 到 20 个字符之间' });
+    }
+    if (password.length < 4) {
+      return res.status(400).json({ success: false, message: '密码长度至少为 4 个字符' });
+    }
+    const newAdmin = ChatDatabase.createAdmin(cleanUser, password, 'admin');
+    broadcastAdminStatusToUsers();
+    res.json({ success: true, admin: newAdmin });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// REST API: Delete Sub-Admin (Super Admin Only)
+app.post('/api/admin/delete', superAdminAuthMiddleware, (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res.status(400).json({ success: false, message: '缺少要删除的管理员用户名' });
+    }
+    const cleanUser = username.trim();
+    ChatDatabase.deleteAdmin(cleanUser);
+
+    if (activeAdminsMap.has(cleanUser)) {
+      const adminSession = activeAdminsMap.get(cleanUser);
+      if (adminSession && adminSession.sockets) {
+        adminSession.sockets.forEach(sId => {
+          const s = io.sockets.sockets.get(sId);
+          if (s) {
+            s.emit('admin-force-logout', { message: '您的管理员账号已被主管理删除' });
+            s.disconnect(true);
+          }
+        });
+      }
+      activeAdminsMap.delete(cleanUser);
+    }
+
+    broadcastAdminStatusToUsers();
+    res.json({ success: true, message: '已删除管理员账号' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// REST API: Public Get Available Admins (for user support selector)
+app.get('/api/admins', (req, res) => {
+  try {
+    const adminList = getAdminListWithStatus();
+    res.json({ success: true, adminList });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -244,15 +392,52 @@ function broadcastUserListToAdmins() {
     ipHistory: u.ipHistory || []
   }));
 
-  adminSockets.forEach(adminSocketId => {
-    io.to(adminSocketId).emit('update-user-list', userList);
+  activeAdminsMap.forEach(admRecord => {
+    admRecord.sockets.forEach(adminSocketId => {
+      io.to(adminSocketId).emit('update-user-list', userList);
+    });
   });
+}
+
+function isAnyAdminOnline() {
+  let count = 0;
+  activeAdminsMap.forEach(adm => {
+    if (adm.sockets && adm.sockets.size > 0) count += adm.sockets.size;
+  });
+  return count > 0;
+}
+
+function sendToAllAdmins(eventName, payload) {
+  activeAdminsMap.forEach(admRecord => {
+    admRecord.sockets.forEach(sId => {
+      io.to(sId).emit(eventName, payload);
+    });
+  });
+}
+
+function getAdminListWithStatus() {
+  try {
+    const allAdmins = ChatDatabase.getAllAdmins();
+    return allAdmins.map(a => {
+      const activeSession = activeAdminsMap.get(a.username);
+      const isOnline = Boolean(activeSession && activeSession.sockets && activeSession.sockets.size > 0);
+      return {
+        username: a.username,
+        role: a.role,
+        online: isOnline,
+        lastLogin: a.last_login || a.created_at
+      };
+    });
+  } catch (e) {
+    return [];
+  }
 }
 
 // Helper to broadcast admin online status to all users
 function broadcastAdminStatusToUsers(targetSocket = null) {
-  const isAdminOnline = adminSockets.size > 0;
-  const payload = { online: isAdminOnline };
+  const isAdminOnline = isAnyAdminOnline();
+  const adminList = getAdminListWithStatus();
+  const payload = { online: isAdminOnline, adminList: adminList };
   if (targetSocket) {
     targetSocket.emit('admin-status-change', payload);
   } else {
@@ -309,6 +494,13 @@ io.on('connection', (socket) => {
 
   // Immediately send current admin status to newly connected client
   broadcastAdminStatusToUsers(socket);
+
+  // Fetch Admin List for User
+  socket.on('get-admin-list', (callback) => {
+    if (typeof callback === 'function') {
+      callback({ success: true, adminList: getAdminListWithStatus() });
+    }
+  });
 
   // 0. Verify Secret Trigger Code for Admin Access
   socket.on('verify-admin-trigger', ({ code }, callback) => {
@@ -412,7 +604,8 @@ io.on('connection', (socket) => {
         joinedAt: userRecord.joinedAt,
         online: true
       },
-      adminOnline: adminSockets.size > 0,
+      adminOnline: isAnyAdminOnline(),
+      adminList: getAdminListWithStatus(),
       historyMessages: historyMessages
     });
 
@@ -421,22 +614,43 @@ io.on('connection', (socket) => {
     console.log(`[USER JOINED] ClientID: ${cleanClientId}, Nickname: ${trimmedNick}, IP: ${clientIP}`);
   });
 
-  // 3. Admin Join with JWT Token Support
-  socket.on('join-admin', ({ secretKey, token }, callback) => {
+  // 3. Admin Join with JWT Token & Multi-Admin Support
+  socket.on('join-admin', ({ username, password, token, secretKey }, callback) => {
     try {
       if (typeof callback !== 'function') return;
+      let payload = null;
 
-      const isValidKey = secretKey && secretKey === ADMIN_KEY;
-      const isValidToken = token && verifyAdminToken(token);
-
-      if (!isValidKey && !isValidToken) {
-        return callback({ success: false, message: '管理员密钥或身份 Token 无效' });
+      if (token) {
+        payload = verifyAdminToken(token);
       }
 
-      const adminToken = signAdminToken();
+      if (!payload && username && password) {
+        const verified = ChatDatabase.verifyAdminLogin(username.trim(), password);
+        if (verified) {
+          payload = { username: verified.username, role: verified.role };
+        }
+      }
+
+      if (!payload && secretKey && secretKey === ADMIN_KEY) {
+        payload = { username: 'admin', role: 'super_admin' };
+      }
+
+      if (!payload) {
+        return callback({ success: false, message: '管理员鉴权失败：账号或密码错误或 Token 已失效' });
+      }
+
+      const adminToken = signAdminToken(payload.username, payload.role);
       socket.adminToken = adminToken;
-      adminSockets.add(socket.id);
+      socket.adminUsername = payload.username;
+      socket.adminRole = payload.role;
       socket.userRole = 'admin';
+
+      let admRecord = activeAdminsMap.get(payload.username);
+      if (!admRecord) {
+        admRecord = { username: payload.username, role: payload.role, sockets: new Set() };
+        activeAdminsMap.set(payload.username, admRecord);
+      }
+      admRecord.sockets.add(socket.id);
 
       const userList = Array.from(activeUsers.values()).map(u => ({
         clientId: u.clientId,
@@ -451,10 +665,20 @@ io.on('connection', (socket) => {
       }));
 
       const allMessages = ChatDatabase.getAllMessagesGroupedByClient();
+      const internalMessages = ChatDatabase.getAdminInternalMessages(payload.username);
 
-      callback({ success: true, token: socket.adminToken, users: userList, allMessages: allMessages });
+      callback({
+        success: true,
+        token: socket.adminToken,
+        username: payload.username,
+        role: payload.role,
+        users: userList,
+        allMessages: allMessages,
+        internalMessages: internalMessages
+      });
+
       broadcastAdminStatusToUsers();
-      console.log(`[ADMIN CONNECTED] Socket ID: ${socket.id}`);
+      console.log(`[ADMIN CONNECTED] Username: ${payload.username} (${payload.role}), Socket ID: ${socket.id}`);
     } catch (err) {
       console.error('[ADMIN JOIN ERROR]', err);
       if (typeof callback === 'function') {
@@ -463,8 +687,51 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Admin to Admin Internal Messaging
+  socket.on('admin-internal-message', ({ text, receiverUsername, timestamp, id }, callback) => {
+    if (socket.userRole !== 'admin' || !socket.adminUsername) {
+      return callback && callback({ success: false, message: '无管理员权限' });
+    }
+
+    const msgPayload = {
+      id: id || Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      senderUsername: socket.adminUsername,
+      receiverUsername: receiverUsername || 'ALL',
+      text: text,
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    ChatDatabase.saveAdminInternalMessage(msgPayload);
+
+    let delivered = false;
+
+    if (msgPayload.receiverUsername === 'ALL') {
+      sendToAllAdmins('new-admin-internal-message', msgPayload);
+      delivered = true;
+    } else {
+      const targetAdmin = activeAdminsMap.get(msgPayload.receiverUsername);
+      if (targetAdmin && targetAdmin.sockets) {
+        targetAdmin.sockets.forEach(sId => {
+          io.to(sId).emit('new-admin-internal-message', msgPayload);
+        });
+        delivered = true;
+      }
+
+      const senderAdmin = activeAdminsMap.get(socket.adminUsername);
+      if (senderAdmin && senderAdmin.sockets) {
+        senderAdmin.sockets.forEach(sId => {
+          if (msgPayload.receiverUsername !== socket.adminUsername) {
+            io.to(sId).emit('new-admin-internal-message', msgPayload);
+          }
+        });
+      }
+    }
+
+    if (callback) callback({ success: true, delivered });
+  });
+
   // 4. User Sends Message to Admin
-  socket.on('user-message', ({ text, timestamp, id }, callback) => {
+  socket.on('user-message', ({ text, timestamp, id, targetAdminUsername }, callback) => {
     if (socket.userRole !== 'user' || !socket.clientId) {
       return callback && callback({ success: false, message: '未登录或身份非普通用户' });
     }
@@ -485,20 +752,48 @@ io.on('connection', (socket) => {
       reason: userRecord.reason,
       text: text,
       timestamp: timestamp || new Date().toISOString(),
-      senderRole: 'user'
+      senderRole: 'user',
+      targetAdmin: targetAdminUsername || null
     };
 
-    console.log(`[USER MESSAGE] From ${userRecord.nickname} (${socket.clientId}):`, text && text.length > 80 ? text.substring(0, 80) + '...' : text);
+    console.log(`[USER MESSAGE] From ${userRecord.nickname} (${socket.clientId}) -> Target Admin: ${targetAdminUsername || 'All'}:`, text && text.length > 80 ? text.substring(0, 80) + '...' : text);
 
     // Save to SQLite DB
     ChatDatabase.saveMessage(socket.clientId, msgPayload);
 
-    // Forward to all admins
+    // Forwarding logic:
+    // 1. Direct to targetAdminUsername if specified & active
+    // 2. Direct to Super Admin for real-time monitoring
+    // 3. Fallback: if no target or target offline, broadcast to all online admins
     let deliveredToAdmin = false;
-    adminSockets.forEach(adminSocketId => {
-      io.to(adminSocketId).emit('new-user-message', msgPayload);
-      deliveredToAdmin = true;
+    const targetAdmRecord = targetAdminUsername ? activeAdminsMap.get(targetAdminUsername) : null;
+
+    if (targetAdmRecord && targetAdmRecord.sockets && targetAdmRecord.sockets.size > 0) {
+      targetAdmRecord.sockets.forEach(sId => {
+        io.to(sId).emit('new-user-message', msgPayload);
+        deliveredToAdmin = true;
+      });
+    }
+
+    // Always copy to super admins if not already delivered to them above
+    activeAdminsMap.forEach(admRecord => {
+      if (admRecord.role === 'super_admin' && admRecord.username !== targetAdminUsername) {
+        admRecord.sockets.forEach(sId => {
+          io.to(sId).emit('new-user-message', msgPayload);
+          deliveredToAdmin = true;
+        });
+      }
     });
+
+    // Fallback: if not delivered to target admin or super admin, broadcast to any online admin
+    if (!deliveredToAdmin) {
+      activeAdminsMap.forEach(admRecord => {
+        admRecord.sockets.forEach(sId => {
+          io.to(sId).emit('new-user-message', msgPayload);
+          deliveredToAdmin = true;
+        });
+      });
+    }
 
     if (callback) {
       callback({
@@ -539,8 +834,10 @@ io.on('connection', (socket) => {
     }
 
     // Echo back to all admin sockets to sync multi-admin view
-    adminSockets.forEach(adminSocketId => {
-      io.to(adminSocketId).emit('admin-message-sent', msgPayload);
+    activeAdminsMap.forEach(admRecord => {
+      admRecord.sockets.forEach(adminSocketId => {
+        io.to(adminSocketId).emit('admin-message-sent', msgPayload);
+      });
     });
 
     if (callback) {
@@ -555,12 +852,10 @@ io.on('connection', (socket) => {
   // Typing Status Event Forwarding
   socket.on('typing', ({ isTyping, targetClientId }) => {
     if (socket.userRole === 'user' && socket.clientId) {
-      adminSockets.forEach(adminSocketId => {
-        io.to(adminSocketId).emit('user-typing', {
-          clientId: socket.clientId,
-          nickname: socket.userNickname || '用户',
-          isTyping: Boolean(isTyping)
-        });
+      sendToAllAdmins('user-typing', {
+        clientId: socket.clientId,
+        nickname: socket.userNickname || '用户',
+        isTyping: Boolean(isTyping)
       });
     } else if (socket.userRole === 'admin' && targetClientId) {
       const targetUser = activeUsers.get(targetClientId);
@@ -653,9 +948,7 @@ io.on('connection', (socket) => {
       });
     }
 
-    adminSockets.forEach(adminSocketId => {
-      io.to(adminSocketId).emit('file-request-response', updatePayload);
-    });
+    sendToAllAdmins('file-request-response', updatePayload);
 
     if (callback) {
       callback({ success: true });
@@ -713,9 +1006,7 @@ io.on('connection', (socket) => {
         });
       }
 
-      adminSockets.forEach(adminSocketId => {
-        io.to(adminSocketId).emit('file-upload-finished', payload);
-      });
+      sendToAllAdmins('file-upload-finished', payload);
 
       if (callback) {
         callback({ success: true, fileUrl });
@@ -729,18 +1020,16 @@ io.on('connection', (socket) => {
   // 6. Typing Indicators
   socket.on('typing', ({ isTyping, targetClientId }) => {
     if (socket.userRole === 'user') {
-      adminSockets.forEach(adminSocketId => {
-        io.to(adminSocketId).emit('user-typing', {
-          clientId: socket.clientId,
-          nickname: socket.userNickname,
-          isTyping
-        });
+      sendToAllAdmins('user-typing', {
+        clientId: socket.clientId,
+        nickname: socket.userNickname,
+        isTyping: Boolean(isTyping)
       });
     } else if (socket.userRole === 'admin' && targetClientId) {
       const targetUser = activeUsers.get(targetClientId);
       if (targetUser && targetUser.online) {
         targetUser.sockets.forEach(sId => {
-          io.to(sId).emit('admin-typing', { isTyping });
+          io.to(sId).emit('admin-typing', { isTyping: Boolean(isTyping) });
         });
       }
     }
@@ -753,9 +1042,15 @@ io.on('connection', (socket) => {
 
   // 8. Disconnect
   socket.on('disconnect', (reason) => {
-    if (socket.userRole === 'admin') {
-      adminSockets.delete(socket.id);
-      console.log(`[ADMIN DISCONNECTED] Socket ID: ${socket.id}, Reason: ${reason}`);
+    if (socket.userRole === 'admin' && socket.adminUsername) {
+      const admRecord = activeAdminsMap.get(socket.adminUsername);
+      if (admRecord) {
+        admRecord.sockets.delete(socket.id);
+        if (admRecord.sockets.size === 0) {
+          activeAdminsMap.delete(socket.adminUsername);
+        }
+      }
+      console.log(`[ADMIN DISCONNECTED] Username: ${socket.adminUsername}, Socket ID: ${socket.id}, Reason: ${reason}`);
       broadcastAdminStatusToUsers();
     } else if (socket.userRole === 'user') {
       handleUserDisconnect(socket);

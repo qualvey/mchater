@@ -68,11 +68,18 @@
       <!-- Admin Login Form (hidden by default) -->
       <form id="admin-login-form" style="display: none;">
         <div class="form-group">
-          <label for="input-admin-key">管理员专属密钥</label>
+          <label for="input-admin-username">管理员账号</label>
           <div class="input-wrapper">
-            <input type="password" id="input-admin-key" placeholder="默认密钥：admin123" required autocomplete="current-password">
+            <input type="text" id="input-admin-username" placeholder="管理员账号 (默认: admin)" required autocomplete="username">
           </div>
-          <div class="hint-text">验证成功后将进入多用户统一管理控制台。</div>
+        </div>
+
+        <div class="form-group">
+          <label for="input-admin-password">密码</label>
+          <div class="input-wrapper">
+            <input type="password" id="input-admin-password" placeholder="密码 (默认: admin123)" required autocomplete="current-password">
+          </div>
+          <div class="hint-text">支持超级主管理与客服账号登录。</div>
         </div>
 
         <button type="submit" class="btn-submit">
@@ -99,12 +106,24 @@
         <!-- Header -->
         <div class="chat-header">
           <div class="chat-header-info">
-            <div class="avatar">管</div>
+            <div class="avatar" id="current-target-avatar">🎧</div>
             <div class="chat-header-details">
-              <h4>系统管理员 (Admin)</h4>
+              <div class="target-admin-selector-wrapper">
+                <button type="button" class="btn-admin-selector" id="btn-toggle-admin-selector" title="点击选择或切换专属客服">
+                  <h4 id="current-target-admin-name">在线客服团队 (自动)</h4>
+                  <span class="selector-arrow">▼</span>
+                </button>
+                <!-- Dropdown Admin List -->
+                <div class="admin-selector-dropdown hidden" id="admin-selector-dropdown">
+                  <div class="dropdown-header">请选择沟通客服</div>
+                  <div class="admin-option-list" id="admin-option-list">
+                    <!-- Rendered by JS -->
+                  </div>
+                </div>
+              </div>
               <p id="admin-status-text">
                 <span class="status-dot online" id="admin-status-dot"></span>
-                <span>在线中</span>
+                <span id="admin-status-label">客服在线中</span>
               </p>
             </div>
           </div>
@@ -156,9 +175,23 @@
         <div class="sidebar-header">
           <h3>
             <span>控制台</span>
-            <span class="admin-badge">管理员</span>
+            <span class="admin-badge" id="admin-role-badge">管理员</span>
           </h3>
-          <button class="btn-icon btn-danger btn-icon-only" id="btn-admin-logout" title="退出管理员账号">🚪</button>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn-icon" id="btn-admin-manage-users" title="管理员账号管理 (主管理特权)" style="display:none; padding: 4px 8px; font-size: 11px;">👥 账号</button>
+            <button class="btn-icon btn-danger btn-icon-only" id="btn-admin-logout" title="退出管理员账号">🚪</button>
+          </div>
+        </div>
+
+        <!-- Sidebar Category Tabs -->
+        <div class="sidebar-tabs">
+          <button type="button" class="sidebar-tab active" id="admin-tab-customers">
+            💬 客户会话
+          </button>
+          <button type="button" class="sidebar-tab" id="admin-tab-team">
+            👥 团队内部
+            <span class="badge-unread hidden" id="team-unread-badge">0</span>
+          </button>
         </div>
 
         <!-- Search Bar -->
@@ -166,11 +199,16 @@
           <input type="text" id="admin-user-search" placeholder="搜索用户昵称/ID/原因...">
         </div>
 
-        <!-- Users List -->
+        <!-- Customer Users List -->
         <div class="user-list" id="admin-user-list">
           <div class="empty-placeholder" style="margin-top: 40px;">
             <p>暂无连接或历史用户</p>
           </div>
+        </div>
+
+        <!-- Admin Team Members List (Hidden by default) -->
+        <div class="user-list hidden" id="admin-team-list">
+          <!-- Rendered by JS -->
         </div>
       </div>
 
@@ -264,6 +302,47 @@
     <div class="context-menu-item danger" id="ctx-item-delete">
       <span class="ctx-icon">🗑️</span>
       <span>彻底删除该会话</span>
+    </div>
+  </div>
+
+  <!-- Super Admin Management Modal Overlay -->
+  <div id="admin-management-modal" class="modal-overlay hidden" style="z-index: 150;">
+    <div class="login-card" style="max-width: 580px; padding: 28px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--glass-border); padding-bottom: 12px;">
+        <h3 style="display: flex; align-items: center; gap: 8px; font-size: 18px; color: var(--text-main);">
+          <span>👥 管理员账号控制台</span>
+          <span class="admin-badge">主管理特权</span>
+        </h3>
+        <button id="btn-close-admin-modal" class="btn-icon" style="padding: 4px 10px;">✕</button>
+      </div>
+
+      <!-- Create New Admin Form -->
+      <form id="create-admin-form" style="margin-bottom: 24px; background: rgba(15, 23, 42, 0.4); padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--glass-border);">
+        <h4 style="font-size: 14px; margin-bottom: 10px; color: var(--text-main);">➕ 创建新客服管理员</h4>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <input type="text" id="new-admin-username" placeholder="用户名 (例: kefu_01)" required style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+          <input type="password" id="new-admin-password" placeholder="密码 (至少4位)" required style="flex: 1; min-width: 130px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+          <button type="submit" class="btn-submit" style="padding: 8px 16px; width: auto; font-size: 13px;">创建开户</button>
+        </div>
+      </form>
+
+      <!-- Admin Accounts List Table -->
+      <h4 style="font-size: 14px; margin-bottom: 10px; color: var(--text-main);">📋 现有管理员列表</h4>
+      <div style="max-height: 220px; overflow-y: auto; border: 1px solid var(--glass-border); border-radius: var(--radius-md);">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+          <thead>
+            <tr style="background: rgba(15, 23, 42, 0.6); color: var(--text-muted); border-bottom: 1px solid var(--glass-border);">
+              <th style="padding: 10px 12px;">用户名</th>
+              <th style="padding: 10px 12px;">角色</th>
+              <th style="padding: 10px 12px;">创建时间</th>
+              <th style="padding: 10px 12px; text-align: right;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="admin-accounts-list">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 

@@ -41,14 +41,40 @@ class DeviceFingerprint {
 class ChatStorageManager {
   static PROFILE_KEY = 'mychat_user_profile';
 
+  static LAST_USER_KEY = 'mychat_last_user_info';
+
   // Save logged-in profile (binds deviceId, nickname, reason)
   static saveProfile(profile) {
     try {
       const deviceId = DeviceFingerprint.getDeviceId();
       const payload = { ...profile, deviceId };
       localStorage.setItem(this.PROFILE_KEY, JSON.stringify(payload));
+      if (profile.role === 'user' && (profile.nickname || profile.reason)) {
+        this.saveLastUserInfo(profile.nickname, profile.reason);
+      }
     } catch (e) {
       console.error('Failed to save profile to localStorage', e);
+    }
+  }
+
+  // Save last used user info (persists across logout)
+  static saveLastUserInfo(nickname, reason) {
+    try {
+      if (nickname || reason) {
+        localStorage.setItem(this.LAST_USER_KEY, JSON.stringify({ nickname, reason }));
+      }
+    } catch (e) {
+      console.error('Failed to save last user info', e);
+    }
+  }
+
+  // Get last used user info
+  static getLastUserInfo() {
+    try {
+      const data = localStorage.getItem(this.LAST_USER_KEY);
+      return data ? JSON.parse(data) : null;
+    } catch (e) {
+      return null;
     }
   }
 
