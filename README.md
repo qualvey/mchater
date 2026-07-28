@@ -123,8 +123,9 @@ mychat/
 ├── server.js                # Node.js + Express + Socket.IO 后端主服务
 ├── plan.md                  # 开发需求与迭代计划
 ├── bug.md                   # Bug 追踪记录
-├── doc/                     # 项目技术架构与 Debug 复盘文档
-│   └── offline_message_sync_technical_doc.md
+├── doc/                     # 项目技术架构与演进路线图
+│   ├── offline_message_sync_technical_doc.md  # 离线消息与大文件同步复盘文档
+│   └── future_development_roadmap.md          # 生产级通用客服组件演进路线图
 ├── public/                  # 前端静态资源目录
 │   ├── index.html           # 主页面 HTML
 │   ├── css/
