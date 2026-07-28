@@ -4,7 +4,23 @@
  * Includes Image Sending (Paste, Drag & Drop, File Upload, Lightbox Preview)
  */
 document.addEventListener('DOMContentLoaded', () => {
-  const socket = io();
+  // Dynamic Base Path & Host Helper (Supports Subpath / Proxy Deployment)
+  const getRawBase = () => {
+    if (typeof window.MYCHAT_BASE_PATH !== 'undefined') return window.MYCHAT_BASE_PATH;
+    const path = window.location.pathname;
+    return path.replace(/\/index\.html$/, '').replace(/\/$/, '');
+  };
+  const API_BASE = getRawBase().replace(/\/$/, '');
+  const formatApiUrl = (endpoint) => {
+    if (!endpoint) return '';
+    if (endpoint.startsWith('http://') || endpoint.startsWith('https://') || endpoint.startsWith('data:')) return endpoint;
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+    return `${API_BASE}${cleanEndpoint}`;
+  };
+
+  const socket = io({
+    path: API_BASE ? `${API_BASE}/socket.io` : '/socket.io'
+  });
 
   // Device Fingerprint ID for this browser
   const myDeviceId = DeviceFingerprint.getDeviceId();
@@ -78,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminUserHistoryPanel = document.getElementById('admin-user-history-panel');
   const historyNicknamesText = document.getElementById('history-nicknames-text');
   const historyIpsText = document.getElementById('history-ips-text');
+  const btnMobileBackUsers = document.getElementById('btn-mobile-back-users');
 
   // DOM Elements - Context Menu
   const adminContextMenu = document.getElementById('admin-context-menu');
@@ -95,6 +112,13 @@ document.addEventListener('DOMContentLoaded', () => {
     btnToggleUserHistory.addEventListener('click', () => {
       const isHidden = adminUserHistoryPanel.style.display === 'none' || !adminUserHistoryPanel.style.display;
       adminUserHistoryPanel.style.display = isHidden ? 'block' : 'none';
+    });
+  }
+
+  // Mobile Back Button to User List Sidebar
+  if (btnMobileBackUsers && adminView) {
+    btnMobileBackUsers.addEventListener('click', () => {
+      adminView.classList.remove('mobile-show-chat');
     });
   }
 
@@ -700,7 +724,8 @@ document.addEventListener('DOMContentLoaded', () => {
     userView.classList.remove('hidden');
     adminView.classList.add('hidden');
 
-    userIdentityTag.textContent = `昵称: ${userProfile.nickname}`;
+    userIdentityTag.innerHTML = `<span class="user-pill-icon">👤</span><span class="user-pill-name">${escapeHTML(userProfile.nickname)}</span>`;
+    userIdentityTag.title = `当前用户昵称: ${userProfile.nickname}`;
     userReasonDisplay.textContent = userProfile.reason;
 
     renderUserMessages();
@@ -1056,6 +1081,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnAdminImage.disabled = false;
     if (btnAdminFile) btnAdminFile.disabled = false;
 
+    if (adminView) {
+      adminView.classList.add('mobile-show-chat');
+    }
+
     renderAdminChat();
   }
 
@@ -1139,7 +1168,7 @@ document.addEventListener('DOMContentLoaded', () => {
       reader.onload = async (e) => {
         const fileDataUrl = e.target.result;
         try {
-          const resp = await fetch('/api/upload', {
+          const resp = await fetch(formatApiUrl('/api/upload'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1484,7 +1513,7 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadgeHtml = `<span class="file-status-badge approved">✅ 传输完成</span>`;
         actionsHtml = `
           <div style="margin-top: 6px;">
-            <a class="btn-file-download" href="${fileData.fileUrl}" download="${escapeHTML(fileData.fileName)}" target="_blank">📥 下载文件 (${sizeStr})</a>
+            <a class="btn-file-download" href="${formatApiUrl(fileData.fileUrl)}" download="${escapeHTML(fileData.fileName)}" target="_blank">📥 下载文件 (${sizeStr})</a>
           </div>
         `;
       }

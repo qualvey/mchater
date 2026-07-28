@@ -7,6 +7,7 @@ const ChatDatabase = require('./db');
 
 const crypto = require('crypto');
 const app = express();
+app.set('trust proxy', true);
 const server = http.createServer(app);
 
 // Security Headers Middleware
@@ -82,6 +83,7 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 // Load configuration file
 let config = {
   port: 3000,
+  hostname: '::',
   adminKey: 'admin123',
   adminTriggerCode: 'admin888'
 };
@@ -98,6 +100,7 @@ try {
 }
 
 const PORT = process.env.PORT || config.port;
+const HOSTNAME = process.env.HOSTNAME || config.hostname;
 const ADMIN_KEY = process.env.ADMIN_KEY || config.adminKey;
 const ADMIN_TRIGGER_CODE = process.env.ADMIN_TRIGGER_CODE || config.adminTriggerCode;
 
@@ -183,7 +186,7 @@ app.post('/api/upload', (req, res) => {
         let fileData = {};
         try {
           fileData = JSON.parse(dbMsg.text);
-        } catch (e) {}
+        } catch (e) { }
 
         fileData.fileStatus = 'completed';
         fileData.fileUrl = fileUrl;
@@ -321,7 +324,7 @@ io.on('connection', (socket) => {
     if (!nickname || typeof nickname !== 'string') {
       return callback({ available: false, message: '请提供有效的昵称' });
     }
-    
+
     const trimmed = nickname.trim();
     if (trimmed.length < 2 || trimmed.length > 20) {
       return callback({ available: false, message: '昵称长度需在 2 到 20 个字符之间' });
@@ -688,7 +691,7 @@ io.on('connection', (socket) => {
       let fileData = {};
       try {
         fileData = JSON.parse(dbMsg.text);
-      } catch (e) {}
+      } catch (e) { }
 
       fileData.fileStatus = 'completed';
       fileData.fileUrl = fileUrl;
@@ -760,9 +763,9 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOSTNAME, () => {
   console.log(`=================================`);
-  console.log(`💬 Chat Server running on http://localhost:${PORT}`);
+  console.log(`💬 Chat Server running on http://${HOSTNAME}:${PORT}`);
   console.log(`🔑 Admin key: ${ADMIN_KEY}`);
   console.log(`🔐 Admin Trigger Secret: ${ADMIN_TRIGGER_CODE}`);
   console.log(`💾 SQLite Database connected: chat.db`);

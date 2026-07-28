@@ -12,3 +12,5 @@
 [x] 防刷屏与速率限制 (Rate Limiting)：防 DOS/CC 恶意刷消息与文件请求
 [x] 跨站安全 (XSS / Iframe 嵌入防护)：强化 DOM 转义与安全 CSP 响应头
 [x] 管理员 JWT Token 动态鉴权认证 (替代静态密码)
+[x] 支持 Nginx 子路径反向代理与动态基准路径配置 (Universal BASE_PATH)
+[x] 全面移动端响应式布局适配 (支持手机 100dvh 全屏与管理员双栏切屏)
