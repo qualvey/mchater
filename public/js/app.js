@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // DOM Elements - Admin Team Sidebar Tabs
   const adminTabCustomers = document.getElementById('admin-tab-customers');
   const adminTabTeam = document.getElementById('admin-tab-team');
+  const customersUnreadBadge = document.getElementById('customers-unread-badge');
   const teamUnreadBadge = document.getElementById('team-unread-badge');
   const adminTeamList = document.getElementById('admin-team-list');
 
@@ -127,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let adminInternalTarget = 'ALL'; // 'ALL' | username
   let allAdminInternalMessages = [];
   let teamUnreadCount = 0;
+  let customersUnreadCount = 0;
 
   // DOM Elements - Context Menu
   const adminContextMenu = document.getElementById('admin-context-menu');
@@ -1128,6 +1130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminUserList) adminUserList.classList.remove('hidden');
         if (adminTeamList) adminTeamList.classList.add('hidden');
         if (adminUserSearch) adminUserSearch.placeholder = '搜索用户昵称/ID/原因...';
+        customersUnreadCount = 0;
+        if (customersUnreadBadge) customersUnreadBadge.classList.add('hidden');
         if (adminSelectedClientId) {
           selectUserForAdmin(adminSelectedClientId);
         }
@@ -1787,10 +1791,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
       ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
 
-      if (adminSelectedClientId === clientId) {
+      if (adminActiveSidebarTab === 'customers' && adminSelectedClientId === clientId) {
         renderAdminChat();
       } else {
         ChatStorageManager.incrementUnreadCount(clientId);
+        if (adminActiveSidebarTab !== 'customers') {
+          customersUnreadCount++;
+          if (customersUnreadBadge) {
+            customersUnreadBadge.textContent = customersUnreadCount;
+            customersUnreadBadge.classList.remove('hidden');
+          }
+        }
       }
 
       renderAdminUserList();
@@ -1815,7 +1826,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   socket.on('user-typing', ({ clientId, nickname, isTyping }) => {
-    if (currentRole === 'admin' && adminSelectedClientId === clientId) {
+    if (currentRole === 'admin' && adminActiveSidebarTab === 'customers' && adminSelectedClientId === clientId) {
       adminTypingStatus.style.display = isTyping ? 'block' : 'none';
     }
   });
@@ -1862,6 +1873,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function notifyTyping() {
     if (!currentRole) return;
+    if (currentRole === 'admin' && adminActiveSidebarTab !== 'customers') return;
 
     socket.emit('typing', {
       isTyping: true,
