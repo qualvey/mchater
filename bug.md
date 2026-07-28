@@ -12,3 +12,5 @@
 [x] 移动端模式下普通用户对话窗口被 CSS 全局规则平移出屏幕导致的页面空白问题
 [x] 修复 join-user 回调中残留 adminSockets.size 变量引发的 ReferenceError 崩溃问题
 [x] 修复 revealAdminLogin 中残留 inputAdminKey 引起的 ReferenceError 崩溃及旧 Session 鉴权无法自动恢复问题
+[x] 消息管线不对，用户在自动推荐下发送的消息只有主管理收到。主管理回复给用户的消息全局多管理实时同步
+[x] 前端点击团队内部按钮后，对象列表无延迟实时刷新

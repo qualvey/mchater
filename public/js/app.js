@@ -994,9 +994,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.emit('user-message', msgObj);
   }
 
-  // Socket: Admin Status Change -> User View
+  // Socket: Admin Status Change -> User & Admin Views
   socket.on('admin-status-change', (data) => {
     updateAdminStatusUI(data);
+    if (currentRole === 'admin' && adminActiveSidebarTab === 'team') {
+      renderAdminTeamList();
+    }
   });
 
   // Socket: Incoming Admin Message -> User View
@@ -1063,6 +1066,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Socket: Admin Sent Message Echo -> Sync to all connected admins
+  socket.on('admin-message-sent', (msgObj) => {
+    if (currentRole === 'admin') {
+      const clientId = msgObj.targetClientId;
+      ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
+
+      if (adminSelectedClientId === clientId) {
+        renderAdminChat();
+      }
+      renderAdminUserList();
+    }
+  });
+
   
   
 
@@ -1117,6 +1133,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminUserList) adminUserList.classList.add('hidden');
         teamUnreadCount = 0;
         if (teamUnreadBadge) teamUnreadBadge.classList.add('hidden');
+
+        fetchAdminListForUser();
         renderAdminTeamList();
         selectAdminInternalTarget(adminInternalTarget);
       });

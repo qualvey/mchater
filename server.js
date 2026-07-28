@@ -762,31 +762,27 @@ io.on('connection', (socket) => {
     ChatDatabase.saveMessage(socket.clientId, msgPayload);
 
     // Forwarding logic:
-    // 1. Direct to targetAdminUsername if specified & active
-    // 2. Direct to Super Admin for real-time monitoring
-    // 3. Fallback: if no target or target offline, broadcast to all online admins
+    // 1. Direct to targetAdminUsername if specified & active, plus copy to Super Admin
+    // 2. "自动推荐" (targetAdminUsername is null) -> Broadcast to ALL online admins!
     let deliveredToAdmin = false;
-    const targetAdmRecord = targetAdminUsername ? activeAdminsMap.get(targetAdminUsername) : null;
 
-    if (targetAdmRecord && targetAdmRecord.sockets && targetAdmRecord.sockets.size > 0) {
-      targetAdmRecord.sockets.forEach(sId => {
-        io.to(sId).emit('new-user-message', msgPayload);
-        deliveredToAdmin = true;
-      });
-    }
-
-    // Always copy to super admins if not already delivered to them above
-    activeAdminsMap.forEach(admRecord => {
-      if (admRecord.role === 'super_admin' && admRecord.username !== targetAdminUsername) {
-        admRecord.sockets.forEach(sId => {
+    if (targetAdminUsername) {
+      const targetAdmRecord = activeAdminsMap.get(targetAdminUsername);
+      if (targetAdmRecord && targetAdmRecord.sockets && targetAdmRecord.sockets.size > 0) {
+        targetAdmRecord.sockets.forEach(sId => {
           io.to(sId).emit('new-user-message', msgPayload);
           deliveredToAdmin = true;
         });
       }
-    });
-
-    // Fallback: if not delivered to target admin or super admin, broadcast to any online admin
-    if (!deliveredToAdmin) {
+      activeAdminsMap.forEach(admRecord => {
+        if (admRecord.role === 'super_admin' && admRecord.username !== targetAdminUsername) {
+          admRecord.sockets.forEach(sId => {
+            io.to(sId).emit('new-user-message', msgPayload);
+            deliveredToAdmin = true;
+          });
+        }
+      });
+    } else {
       activeAdminsMap.forEach(admRecord => {
         admRecord.sockets.forEach(sId => {
           io.to(sId).emit('new-user-message', msgPayload);
