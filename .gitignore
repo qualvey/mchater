@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# SQLite Database Files
+chat.db
+chat.db-wal
+chat.db-shm
+
+# User Uploaded Media Files
+public/uploads/*
+!public/uploads/.gitkeep
+
+# Environment & Config Local Overrides
+.env
+*.log
+.DS_Store

@@ -1,0 +1,5 @@
+{
+  "port": 3000,
+  "adminKey": "admin123",
+  "adminTriggerCode": "sing"
+}

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MyChat - 客服与即时求助系统 (一主多从)</title>
+  <meta name="description" content="基于 Node.js 与 Socket.IO 实现的极简高颜值一主多从实时在线沟通与求助系统">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Ambient background orb effects -->
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+
+  <!-- Login / Identity Modal -->
+  <div id="login-modal" class="modal-overlay">
+    <div class="login-card">
+      <div class="login-header">
+        <span class="logo-icon">💬</span>
+        <h2>欢迎使用 MyChat</h2>
+        <p>支持双端登录：普通用户提问与管理员回应</p>
+      </div>
+
+      <!-- Role Tabs -->
+      <div class="role-tabs">
+        <button id="tab-user-role" class="role-tab active" type="button" style="width: 100%;">
+          <span>👤</span> 普通用户
+        </button>
+        <button id="tab-admin-role" class="role-tab" type="button" style="display: none;">
+          <span>🛡️</span> 管理员 (暗号已触发)
+        </button>
+      </div>
+
+      <!-- Error Message Banner -->
+      <div id="login-error" class="error-banner hidden">
+        <span>⚠️</span> <span id="error-text">提示信息</span>
+      </div>
+
+      <!-- User Login Form -->
+      <form id="user-login-form">
+        <div class="form-group">
+          <label for="input-nickname">您的昵称</label>
+          <div class="input-wrapper">
+            <input type="text" id="input-nickname" placeholder="例如：Alice_99" maxlength="20" required autocomplete="off">
+          </div>
+          <div class="hint-text">全网唯一昵称，不能与当前在线用户重名。</div>
+        </div>
+
+        <div class="form-group">
+          <label for="input-reason">请求原因 / 咨询主题</label>
+          <div class="input-wrapper">
+            <textarea id="input-reason" placeholder="例如：想咨询产品定价与售后支持问题..." maxlength="150" required></textarea>
+          </div>
+          <div class="hint-text">清晰的说明有助于管理员快速响应您的诉求。</div>
+        </div>
+
+        <button type="submit" class="btn-submit">
+          <span>进入聊天对话</span> ➔
+        </button>
+      </form>
+
+      <!-- Admin Login Form (hidden by default) -->
+      <form id="admin-login-form" style="display: none;">
+        <div class="form-group">
+          <label for="input-admin-key">管理员专属密钥</label>
+          <div class="input-wrapper">
+            <input type="password" id="input-admin-key" placeholder="默认密钥：admin123" required autocomplete="current-password">
+          </div>
+          <div class="hint-text">验证成功后将进入多用户统一管理控制台。</div>
+        </div>
+
+        <button type="submit" class="btn-submit">
+          <span>登录管理后台</span> ➔
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div id="app">
+    <!-- 1. USER CHAT VIEW -->
+    <div id="user-view" class="chat-view hidden">
+      <div class="chat-main" id="user-chat-main">
+        <!-- Full-Window Drag Drop Overlay -->
+        <div class="drag-drop-overlay" id="user-drag-overlay">
+          <div class="drag-drop-content">
+            <span class="drag-icon">📥</span>
+            <h3>释放以发送或申请文件</h3>
+            <p>图片自动发送，其它文件需管理员同意后传输</p>
+          </div>
+        </div>
+
+        <!-- Header -->
+        <div class="chat-header">
+          <div class="chat-header-info">
+            <div class="avatar">管</div>
+            <div class="chat-header-details">
+              <h4>系统管理员 (Admin)</h4>
+              <p id="admin-status-text">
+                <span class="status-dot online" id="admin-status-dot"></span>
+                <span>在线中</span>
+              </p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <span class="btn-icon" id="user-identity-tag">昵称: -</span>
+            <button class="btn-icon btn-danger" id="btn-user-logout" title="退出并切换身份">退出账号</button>
+          </div>
+        </div>
+
+        <!-- Request Reason Bar -->
+        <div class="reason-banner">
+          <span>📋 我的请求原因：</span>
+          <strong id="user-reason-display">未填写</strong>
+        </div>
+
+        <!-- Messages Container -->
+        <div class="messages-container" id="user-messages">
+          <div class="empty-placeholder">
+            <div class="icon">💬</div>
+            <p>消息按设备绑定并保存在本地，随时可与管理员沟通！</p>
+          </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div class="typing-indicator" id="user-typing-status" style="display: none;">
+          管理员正在输入...
+        </div>
+
+        <!-- Input Footer -->
+        <div class="chat-input-area" id="user-input-area">
+          <input type="file" id="user-image-input" accept="image/*" style="display: none;">
+          <input type="file" id="user-anyfile-input" style="display: none;">
+          <div class="input-box-wrapper">
+            <button type="button" class="btn-icon" id="btn-user-image" title="发送图片 (支持拖放/粘贴)">📷</button>
+            <button type="button" class="btn-icon" id="btn-user-file" title="申请发送文件 (需管理员同意)">📁</button>
+            <textarea id="user-input" placeholder="输入消息... (支持粘贴图片/文件拖放, Enter 发送)" rows="1"></textarea>
+            <button class="btn-send" id="btn-user-send">
+              <span>发送</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. ADMIN CHAT VIEW -->
+    <div id="admin-view" class="chat-view hidden">
+      <!-- Left Sidebar: Users list -->
+      <div class="admin-sidebar">
+        <div class="sidebar-header">
+          <h3>
+            <span>控制台</span>
+            <span class="admin-badge">管理员</span>
+          </h3>
+          <button class="btn-icon btn-danger" id="btn-admin-logout" style="padding: 4px 8px; font-size: 11px;">退出</button>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="search-box">
+          <input type="text" id="admin-user-search" placeholder="搜索用户昵称/ID/原因...">
+        </div>
+
+        <!-- Users List -->
+        <div class="user-list" id="admin-user-list">
+          <div class="empty-placeholder" style="margin-top: 40px;">
+            <p>暂无连接或历史用户</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Main Chat Area -->
+      <div class="chat-main" id="admin-chat-main">
+        <!-- Full-Window Drag Drop Overlay -->
+        <div class="drag-drop-overlay" id="admin-drag-overlay">
+          <div class="drag-drop-content">
+            <span class="drag-icon" id="admin-drag-icon">📥</span>
+            <h3 id="admin-drag-title">释放文件即可发送</h3>
+            <p id="admin-drag-desc">将直接发送给当前选中的用户</p>
+          </div>
+        </div>
+
+        <!-- Selected User Chat Header -->
+        <div class="chat-header">
+          <div class="chat-header-info">
+            <div class="avatar" id="admin-target-avatar">?</div>
+            <div class="chat-header-details">
+              <h4 id="admin-target-nickname">请选择左侧用户</h4>
+              <p id="admin-target-status">选择用户后查看其提问记录</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="btn-icon btn-danger" id="btn-clear-target-chat" style="display:none;">
+              🗑️ 清空该会话
+            </button>
+          </div>
+        </div>
+
+        <!-- Selected User Reason & Audit History Banner -->
+        <div class="reason-banner" id="admin-target-reason-bar" style="display: none; flex-direction: column; align-items: flex-start; gap: 6px;">
+          <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+            <div>
+              <span>📋 请求原因：</span>
+              <strong id="admin-target-reason-text">无</strong>
+            </div>
+            <button id="btn-toggle-user-history" class="btn-icon" style="padding: 2px 8px; font-size: 11px;" type="button">
+              🔍 审计轨迹 (历史昵称/IP)
+            </button>
+          </div>
+          <div id="admin-user-history-panel" style="display: none; width: 100%; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--glass-border); font-size: 12px;">
+            <div style="margin-bottom: 4px;">🏷️ <strong>历史曾用昵称：</strong><span id="history-nicknames-text">无</span></div>
+            <div>🌐 <strong>登录 IP 轨迹记录：</strong><span id="history-ips-text">无</span></div>
+          </div>
+        </div>
+
+        <!-- Messages Area -->
+        <div class="messages-container" id="admin-messages">
+          <div class="empty-placeholder">
+            <div class="icon">👈</div>
+            <p>请在左侧侧边栏选择一个用户开始对话</p>
+          </div>
+        </div>
+
+        <!-- Typing Indicator -->
+        <div class="typing-indicator" id="admin-typing-status" style="display: none;">
+          用户正在输入...
+        </div>
+
+        <!-- Input Footer -->
+        <div class="chat-input-area" id="admin-input-area">
+          <input type="file" id="admin-image-input" accept="image/*" style="display: none;">
+          <input type="file" id="admin-anyfile-input" style="display: none;">
+          <div class="input-box-wrapper">
+            <button type="button" class="btn-icon" id="btn-admin-image" title="发送图片" disabled>📷</button>
+            <button type="button" class="btn-icon" id="btn-admin-file" title="发送文件" disabled>📁</button>
+            <textarea id="admin-input" placeholder="选择用户后，输入回复内容... (支持图片/文件拖放, Enter 发送)" rows="1" disabled></textarea>
+            <button class="btn-send" id="btn-admin-send" disabled>
+              <span>发送</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Lightbox Modal for Large Preview -->
+  <div id="image-lightbox-modal" class="modal-overlay hidden" style="background: rgba(0, 0, 0, 0.88); z-index: 200;">
+    <div style="position: relative; max-width: 90vw; max-height: 90vh;">
+      <button id="btn-close-lightbox" class="btn-icon btn-danger" style="position: absolute; top: -40px; right: 0; padding: 6px 14px; font-size: 14px;">✕ 关闭大图</button>
+      <img id="lightbox-image-element" src="" alt="大图预览" style="max-width: 90vw; max-height: 85vh; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); object-fit: contain;">
+    </div>
+  </div>
+
+  <!-- Admin Right-Click Context Menu -->
+  <div id="admin-context-menu" class="context-menu hidden">
+    <div class="context-menu-item" id="ctx-item-clear">
+      <span class="ctx-icon">🧹</span>
+      <span>清空该聊天记录</span>
+    </div>
+    <div class="context-menu-item danger" id="ctx-item-delete">
+      <span class="ctx-icon">🗑️</span>
+      <span>彻底删除该会话</span>
+    </div>
+  </div>
+
+  <!-- Socket.IO & JS Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/idb-store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
