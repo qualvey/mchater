@@ -376,6 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
           if (res.internalMessages) {
             allAdminInternalMessages = res.internalMessages;
           }
+          if (res.adminList) {
+            updateAdminStatusUI(res);
+          }
           if (res.users) {
             updateAdminUsersMap(res.users);
             renderAdminUserList();
@@ -537,6 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
           });
           if (res.allMessages) syncAdminOfflineMessages(res.allMessages);
           if (res.internalMessages) allAdminInternalMessages = res.internalMessages;
+          if (res.adminList) updateAdminStatusUI(res);
           initAdminView(res.users || []);
         } else {
           showError((res && res.message) || '管理员身份凭证已失效，请重新输入密码登录');
@@ -760,6 +764,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (res.internalMessages) {
         allAdminInternalMessages = res.internalMessages;
+      }
+      if (res.adminList) {
+        updateAdminStatusUI(res);
       }
 
       initAdminView(res.users || []);
@@ -1109,6 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     updateAdminUsersMap(serverUsers);
+    fetchAdminListForUser();
     renderAdminUserList();
 
     if (adminTabCustomers) {
@@ -1118,6 +1126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminTabTeam) adminTabTeam.classList.remove('active');
         if (adminUserList) adminUserList.classList.remove('hidden');
         if (adminTeamList) adminTeamList.classList.add('hidden');
+        if (adminUserSearch) adminUserSearch.placeholder = '搜索用户昵称/ID/原因...';
         if (adminSelectedClientId) {
           selectUserForAdmin(adminSelectedClientId);
         }
@@ -1131,6 +1140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminTabCustomers) adminTabCustomers.classList.remove('active');
         if (adminTeamList) adminTeamList.classList.remove('hidden');
         if (adminUserList) adminUserList.classList.add('hidden');
+        if (adminUserSearch) adminUserSearch.placeholder = '搜索团队成员...';
         teamUnreadCount = 0;
         if (teamUnreadBadge) teamUnreadBadge.classList.add('hidden');
 
@@ -1154,7 +1164,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    adminUserSearch.addEventListener('input', () => renderAdminUserList());
+    adminUserSearch.addEventListener('input', () => {
+      if (adminActiveSidebarTab === 'team') {
+        renderAdminTeamList();
+      } else {
+        renderAdminUserList();
+      }
+    });
 
     adminInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -1407,6 +1423,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderAdminTeamList() {
     if (!adminTeamList) return;
     adminTeamList.innerHTML = '';
+    const filterText = (adminUserSearch ? adminUserSearch.value : '').trim().toLowerCase();
 
     const hallDiv = document.createElement('div');
     const isHallSel = adminInternalTarget === 'ALL';
@@ -1423,10 +1440,16 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
     hallDiv.addEventListener('click', () => selectAdminInternalTarget('ALL'));
-    adminTeamList.appendChild(hallDiv);
+    
+    if (!filterText || '团队内部大厅 全员频道 公共群聊'.includes(filterText)) {
+      adminTeamList.appendChild(hallDiv);
+    }
 
     availableAdminsList.forEach(adm => {
       if (adm.username === currentAdminUsername) return;
+      if (filterText && !adm.username.toLowerCase().includes(filterText) && !(adm.role || '').toLowerCase().includes(filterText)) {
+        return;
+      }
       const isSel = adminInternalTarget === adm.username;
       const admDiv = document.createElement('div');
       admDiv.className = `user-item ${isSel ? 'active' : ''}`;

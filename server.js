@@ -666,6 +666,7 @@ io.on('connection', (socket) => {
 
       const allMessages = ChatDatabase.getAllMessagesGroupedByClient();
       const internalMessages = ChatDatabase.getAdminInternalMessages(payload.username);
+      const adminList = getAdminListWithStatus();
 
       callback({
         success: true,
@@ -674,7 +675,8 @@ io.on('connection', (socket) => {
         role: payload.role,
         users: userList,
         allMessages: allMessages,
-        internalMessages: internalMessages
+        internalMessages: internalMessages,
+        adminList: adminList
       });
 
       broadcastAdminStatusToUsers();
