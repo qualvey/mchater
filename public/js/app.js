@@ -85,6 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminDragTitle = document.getElementById('admin-drag-title');
   const adminDragDesc = document.getElementById('admin-drag-desc');
   const adminUserListContainer = document.getElementById('admin-user-list');
+  const adminUserList = adminUserListContainer;
   const adminUserSearch = document.getElementById('admin-user-search');
   const adminMessagesContainer = document.getElementById('admin-messages');
   const adminInput = document.getElementById('admin-input');
