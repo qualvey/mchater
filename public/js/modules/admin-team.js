@@ -489,9 +489,11 @@ export class AdminTeamModule {
     const bubbleWrapper = document.createElement('div');
     bubbleWrapper.className = `message-bubble-wrapper ${isSentByMe ? 'sent' : 'received'}`;
     
+    const senderName = isSentByMe ? `我 (${msg.senderUsername || this.currentAdminUsername})` : (msg.senderUsername || msg.fromNickname || '管理员');
+
     bubbleWrapper.innerHTML = `
       <div class="message-meta">
-        <span>${this.escapeHTML(msg.fromNickname || '管理员')}</span>
+        <span>${this.escapeHTML(senderName)}</span>
         <span>•</span>
         <span>${timeStr}</span>
       </div>

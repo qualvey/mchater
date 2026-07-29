@@ -28,6 +28,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const adminCustomer = new AdminCustomerModule(socket);
   const adminTeam = new AdminTeamModule(socket);
 
+  window.userChat = userChat;
+  window.adminCustomer = adminCustomer;
+  window.adminTeam = adminTeam;
+  window.adminActiveSidebarTab = 'customers';
+
   // DOM Elements - Modal & Forms
   const modalOverlay = document.getElementById('login-modal');
   const tabUserRole = document.getElementById('tab-user-role');
@@ -480,6 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (adminTabCustomers) {
       adminTabCustomers.addEventListener('click', () => {
         adminActiveSidebarTab = 'customers';
+        window.adminActiveSidebarTab = 'customers';
         adminTabCustomers.classList.add('active');
         if (adminTabTeam) adminTabTeam.classList.remove('active');
         if (adminUserList) adminUserList.classList.remove('hidden');
@@ -496,6 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (adminTabTeam) {
       adminTabTeam.addEventListener('click', () => {
         adminActiveSidebarTab = 'team';
+        window.adminActiveSidebarTab = 'team';
         adminTabTeam.classList.add('active');
         if (adminTabCustomers) adminTabCustomers.classList.remove('active');
         if (adminTeamList) adminTeamList.classList.remove('hidden');

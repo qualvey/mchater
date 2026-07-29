@@ -78,13 +78,13 @@ export class AdminCustomerModule {
       this.adminInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
-          this.sendAdminMessage();
+          this.handleSendMessage();
         }
       });
     }
 
     if (this.btnAdminSend) {
-      this.btnAdminSend.addEventListener('click', () => this.sendAdminMessage());
+      this.btnAdminSend.addEventListener('click', () => this.handleSendMessage());
     }
 
     if (this.btnClearTargetChat) {
@@ -451,17 +451,33 @@ export class AdminCustomerModule {
     this.adminMessagesContainer.scrollTop = this.adminMessagesContainer.scrollHeight;
   }
 
+  handleSendMessage() {
+    if (window.adminActiveSidebarTab === 'team') {
+      if (window.adminTeam) {
+        const text = this.adminInput ? this.adminInput.value.trim() : '';
+        if (text) {
+          window.adminTeam.sendTeamMessage(text);
+          this.adminInput.value = '';
+        }
+      }
+    } else {
+      this.sendAdminMessage();
+    }
+  }
+
   sendAdminMessage() {
     const text = this.adminInput.value.trim();
     if (!text || !this.adminSelectedClientId) return;
 
     const userObj = this.allAdminUsersMap.get(this.adminSelectedClientId);
+    const senderName = this.currentAdminUsername || '管理员';
 
     const msgObj = {
       id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
       targetClientId: this.adminSelectedClientId,
       targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
+      fromNickname: senderName,
+      senderUsername: this.currentAdminUsername,
       msgType: 'text',
       reason: userObj ? userObj.reason : '',
       text: text,
@@ -477,15 +493,24 @@ export class AdminCustomerModule {
   }
 
   sendAdminImageMessage(imageDataUrl) {
+    if (window.adminActiveSidebarTab === 'team') {
+      if (window.adminTeam) {
+        window.adminTeam.sendTeamMessage(imageDataUrl);
+      }
+      return;
+    }
+
     if (!this.adminSelectedClientId) return;
 
     const userObj = this.allAdminUsersMap.get(this.adminSelectedClientId);
+    const senderName = this.currentAdminUsername || '管理员';
 
     const msgObj = {
       id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
       targetClientId: this.adminSelectedClientId,
       targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
+      fromNickname: senderName,
+      senderUsername: this.currentAdminUsername,
       msgType: 'image',
       reason: userObj ? userObj.reason : '',
       text: imageDataUrl,
@@ -517,11 +542,14 @@ export class AdminCustomerModule {
       fileUrl: ''
     };
 
+    const senderName = this.currentAdminUsername || '管理员';
+
     const msgObj = {
       id: msgId,
       targetClientId: this.adminSelectedClientId,
       targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
+      fromNickname: senderName,
+      senderUsername: this.currentAdminUsername,
       msgType: 'file',
       fileData: fileDataObj,
       text: JSON.stringify(fileDataObj),
@@ -660,9 +688,11 @@ export class AdminCustomerModule {
       contentHtml = this.escapeHTML(msg.text);
     }
 
+    const senderLabel = isSentByMe ? `我 (${msg.fromNickname || msg.senderUsername || '管理员'})` : (msg.fromNickname || '用户');
+
     bubbleWrapper.innerHTML = `
       <div class="message-meta">
-        <span>${this.escapeHTML(isSentByMe ? '我' : (msg.fromNickname || '用户'))}</span>
+        <span>${this.escapeHTML(senderLabel)}</span>
         <span>•</span>
         <span>${timeStr}</span>
       </div>
