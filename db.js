@@ -54,7 +54,8 @@ db.exec(`
     sender_role TEXT NOT NULL,
     sender_nickname TEXT NOT NULL,
     text TEXT NOT NULL,
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    target_admin TEXT
   );
 
   CREATE TABLE IF NOT EXISTS admins (
@@ -83,6 +84,18 @@ try {
   if (!hasDisplayName) {
     db.prepare("ALTER TABLE admins ADD COLUMN display_name TEXT;").run();
     console.log("[DB MIGRATION] Added 'display_name' column to 'admins' table.");
+  }
+} catch (e) {
+  console.error("[DB MIGRATION ERROR]", e);
+}
+
+// Migration: Ensure target_admin column exists in messages table
+try {
+  const msgCols = db.prepare("PRAGMA table_info(messages)").all();
+  const hasTargetAdmin = msgCols.some(col => col.name === 'target_admin');
+  if (!hasTargetAdmin) {
+    db.prepare("ALTER TABLE messages ADD COLUMN target_admin TEXT;").run();
+    console.log("[DB MIGRATION] Added 'target_admin' column to 'messages' table.");
   }
 } catch (e) {
   console.error("[DB MIGRATION ERROR]", e);
