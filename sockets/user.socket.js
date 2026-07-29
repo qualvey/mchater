@@ -3,6 +3,7 @@
  * Manages user connections, nickname checks, join events, message routing, and typing indicators.
  */
 const ChatDatabase = require('../db');
+const Logger = require('../logger');
 
 function registerUserSocketHandlers(io, socket, context) {
   const {
@@ -22,15 +23,18 @@ function registerUserSocketHandlers(io, socket, context) {
   socket.on('check-nickname', ({ nickname, clientId }, callback) => {
     if (typeof callback !== 'function') return;
     if (!nickname || typeof nickname !== 'string') {
+      Logger.debug('USER_NICK_CHECK', `Invalid nickname string check from ClientID: ${clientId}`);
       return callback({ available: false, message: '请提供有效的昵称' });
     }
 
     const trimmed = nickname.trim();
     if (trimmed.length < 2 || trimmed.length > 20) {
+      Logger.debug('USER_NICK_CHECK', `Nickname length out of bounds: '${trimmed}'`);
       return callback({ available: false, message: '昵称长度需在 2 到 20 个字符之间' });
     }
 
     if (['admin', '管理员', '系统消息', 'system'].includes(trimmed.toLowerCase())) {
+      Logger.debug('USER_NICK_CHECK', `Reserved nickname requested: '${trimmed}'`);
       return callback({ available: false, message: '该昵称是保留字，请换一个' });
     }
 
@@ -44,6 +48,7 @@ function registerUserSocketHandlers(io, socket, context) {
     });
 
     if (isUsedByOther) {
+      Logger.debug('USER_NICK_CHECK', `Nickname '${trimmed}' is already in use by another active device`);
       return callback({ available: false, message: '该昵称已被其他设备在线使用，请换一个' });
     }
 
@@ -53,16 +58,19 @@ function registerUserSocketHandlers(io, socket, context) {
   // 2. User Join
   socket.on('join-user', ({ nickname, reason, clientId }, callback) => {
     if (typeof callback !== 'function') return;
+    const clientIP = getClientIP(socket);
+
     if (!nickname || !reason || !clientId) {
+      Logger.warn('USER_JOIN_FAILED', `Missing required join fields from IP: ${clientIP}`);
       return callback({ success: false, message: '昵称、请求原因及设备ID不能为空' });
     }
 
     const trimmedNick = nickname.trim();
     const trimmedReason = reason.trim();
     const cleanClientId = String(clientId).trim();
-    const clientIP = getClientIP(socket);
 
     if (['admin', '管理员', '系统消息', 'system'].includes(trimmedNick.toLowerCase())) {
+      Logger.warn('USER_JOIN_FAILED', `Reserved nickname '${trimmedNick}' attempted by IP: ${clientIP}`);
       return callback({ success: false, message: '该昵称是保留字' });
     }
 
@@ -117,21 +125,24 @@ function registerUserSocketHandlers(io, socket, context) {
 
     broadcastUserListToAdmins();
     broadcastAdminStatusToUsers(socket);
-    console.log(`[USER JOINED] ClientID: ${cleanClientId}, Nickname: ${trimmedNick}, IP: ${clientIP}`);
+    Logger.info('USER_JOINED', `User Joined -> ClientID: ${cleanClientId}, Nickname: '${trimmedNick}', Reason: '${trimmedReason}', IP: ${clientIP}`);
   });
 
   // 3. User Sends Message
   socket.on('user-message', ({ text, timestamp, id, targetAdminUsername }, callback) => {
     if (socket.userRole !== 'user' || !socket.clientId) {
+      Logger.warn('USER_MSG_REJECTED', `Unauthenticated message attempt from Socket ID: ${socket.id}`);
       return callback && callback({ success: false, message: '未登录或身份非普通用户' });
     }
 
     if (isSocketRateLimited(socket.clientId)) {
+      Logger.warn('USER_RATE_LIMITED', `Message rate limit hit for ClientID: ${socket.clientId}`);
       return callback && callback({ success: false, message: '发送频率过快，请稍后再试' });
     }
 
     const userRecord = activeUsers.get(socket.clientId);
     if (!userRecord) {
+      Logger.warn('USER_MSG_REJECTED', `User profile not found for ClientID: ${socket.clientId}`);
       return callback && callback({ success: false, message: '用户信息未找到' });
     }
 
@@ -146,7 +157,8 @@ function registerUserSocketHandlers(io, socket, context) {
       targetAdmin: targetAdminUsername || null
     };
 
-    console.log(`[USER MESSAGE] From ${userRecord.nickname} (${socket.clientId}) -> Target Admin: ${targetAdminUsername || 'All'}:`, text && text.length > 80 ? text.substring(0, 80) + '...' : text);
+    const textPreview = text && text.length > 80 ? text.substring(0, 80) + '...' : text;
+    Logger.debug('USER_MESSAGE', `From '${userRecord.nickname}' (${socket.clientId}) -> Target: '${targetAdminUsername || 'ALL'}': ${textPreview}`);
 
     ChatDatabase.saveMessage(socket.clientId, msgPayload);
 
@@ -188,6 +200,7 @@ function registerUserSocketHandlers(io, socket, context) {
 
   // 4. Leave User
   socket.on('leave-user', () => {
+    Logger.info('USER_LEFT', `User explicit leave for ClientID: ${socket.clientId || 'Unknown'}`);
     handleUserDisconnect(socket);
   });
 }

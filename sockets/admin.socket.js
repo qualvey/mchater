@@ -5,6 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const ChatDatabase = require('../db');
+const Logger = require('../logger');
 
 function registerAdminSocketHandlers(io, socket, context) {
   const {
@@ -24,9 +25,11 @@ function registerAdminSocketHandlers(io, socket, context) {
   socket.on('verify-admin-trigger', ({ code }, callback) => {
     if (typeof callback !== 'function') return;
     if (!code || typeof code !== 'string') {
+      Logger.debug('ADMIN_TRIGGER_VERIFY', `Invalid trigger code input from Socket ID: ${socket.id}`);
       return callback({ success: false });
     }
     const isMatched = code.trim().toLowerCase() === ADMIN_TRIGGER_CODE.trim().toLowerCase();
+    Logger.info('ADMIN_TRIGGER_VERIFY', `Trigger secret code matched: ${isMatched} from Socket ID: ${socket.id}`);
     callback({ success: isMatched });
   });
 
@@ -45,22 +48,28 @@ function registerAdminSocketHandlers(io, socket, context) {
 
       if (token) {
         payload = verifyAdminToken(token);
+        if (!payload) {
+          Logger.warn('ADMIN_JOIN_FAILED', `Socket join-admin failed with invalid/expired token from Socket ID: ${socket.id}`);
+        }
       }
 
       if (!payload && username && password) {
         const verified = ChatDatabase.verifyAdminLogin(username.trim(), password);
         if (verified) {
           payload = { username: verified.username, role: verified.role };
+        } else {
+          Logger.warn('ADMIN_JOIN_FAILED', `Socket join-admin failed for username: '${username}' from Socket ID: ${socket.id} - invalid password`);
         }
       }
 
       if (!payload && secretKey && secretKey === ADMIN_KEY) {
         const superAdmin = ChatDatabase.getAllAdmins().find(a => a.role === 'super_admin');
-        const username = superAdmin ? superAdmin.username : 'admin';
-        payload = { username: username, role: 'super_admin' };
+        const admUser = superAdmin ? superAdmin.username : 'admin';
+        payload = { username: admUser, role: 'super_admin' };
       }
 
       if (!payload) {
+        Logger.warn('ADMIN_JOIN_REJECTED', `Socket join-admin authentication failed from Socket ID: ${socket.id}`);
         return callback({ success: false, message: '管理员鉴权失败：账号或密码错误或 Token 已失效' });
       }
 
@@ -105,9 +114,9 @@ function registerAdminSocketHandlers(io, socket, context) {
       });
 
       broadcastAdminStatusToUsers();
-      console.log(`[ADMIN CONNECTED] Username: ${payload.username} (${payload.role}), Socket ID: ${socket.id}`);
+      Logger.info('ADMIN_CONNECTED', `Admin Connected -> Username: '${payload.username}' (${payload.role}), Socket ID: ${socket.id}`);
     } catch (err) {
-      console.error('[ADMIN JOIN ERROR]', err);
+      Logger.error('ADMIN_JOIN_ERROR', `Exception during socket join-admin:`, err);
       if (typeof callback === 'function') {
         callback({ success: false, message: '服务端处理异常: ' + err.message });
       }
@@ -117,6 +126,7 @@ function registerAdminSocketHandlers(io, socket, context) {
   // Admin to Admin Internal Messaging
   socket.on('admin-internal-message', ({ text, receiverUsername, timestamp, id }, callback) => {
     if (socket.userRole !== 'admin' || !socket.adminUsername) {
+      Logger.warn('ADMIN_INTERNAL_MSG_REJECTED', `Unauthorized internal message from Socket ID: ${socket.id}`);
       return callback && callback({ success: false, message: '无管理员权限' });
     }
 
@@ -127,6 +137,8 @@ function registerAdminSocketHandlers(io, socket, context) {
       text: text,
       timestamp: timestamp || new Date().toISOString()
     };
+
+    Logger.debug('ADMIN_INTERNAL_MSG', `Internal Msg From '${socket.adminUsername}' -> To '${msgPayload.receiverUsername}': ${text}`);
 
     ChatDatabase.saveAdminInternalMessage(msgPayload);
 
@@ -160,6 +172,7 @@ function registerAdminSocketHandlers(io, socket, context) {
   // Admin Sends Message to Specific User (by targetClientId)
   socket.on('admin-message', ({ targetClientId, text, timestamp, id }, callback) => {
     if (socket.userRole !== 'admin') {
+      Logger.warn('ADMIN_MSG_REJECTED', `Unauthorized admin-message attempt from Socket ID: ${socket.id}`);
       return callback && callback({ success: false, message: '无管理员权限' });
     }
 
@@ -174,6 +187,9 @@ function registerAdminSocketHandlers(io, socket, context) {
       timestamp: timestamp || new Date().toISOString(),
       senderRole: 'admin'
     };
+
+    const textPreview = text && text.length > 80 ? text.substring(0, 80) + '...' : text;
+    Logger.debug('ADMIN_MESSAGE', `Admin '${socket.adminUsername}' -> User '${targetNickname}' (${targetClientId}): ${textPreview}`);
 
     ChatDatabase.saveMessage(targetClientId, msgPayload);
 
@@ -203,11 +219,14 @@ function registerAdminSocketHandlers(io, socket, context) {
   // Admin Delete Session or Clear Messages
   socket.on('admin-delete-session', ({ targetClientId }, callback) => {
     if (socket.userRole !== 'admin') {
+      Logger.warn('ADMIN_DELETE_REJECTED', `Unauthorized delete session attempt from Socket ID: ${socket.id}`);
       return callback && callback({ success: false, message: '无管理员权限' });
     }
     if (!targetClientId) {
       return callback && callback({ success: false, message: '目标设备ID缺失' });
     }
+
+    Logger.info('ADMIN_DELETE_SESSION', `Admin '${socket.adminUsername}' deleted session for ClientID: ${targetClientId}`);
 
     const targetUser = activeUsers.get(targetClientId);
     if (targetUser && targetUser.sockets) {
@@ -230,6 +249,8 @@ function registerAdminSocketHandlers(io, socket, context) {
     if (!targetClientId) {
       return callback && callback({ success: false, message: '目标设备ID缺失' });
     }
+
+    Logger.info('ADMIN_CLEAR_MESSAGES', `Admin '${socket.adminUsername}' cleared message history for ClientID: ${targetClientId}`);
 
     const targetUser = activeUsers.get(targetClientId);
     if (targetUser && targetUser.sockets) {
@@ -265,6 +286,8 @@ function registerAdminSocketHandlers(io, socket, context) {
     const updatedText = JSON.stringify(fileData);
     ChatDatabase.updateMessageText(msgId, updatedText);
 
+    Logger.info('ADMIN_FILE_RESPONSE', `Admin '${socket.adminUsername}' ${approved ? 'APPROVED' : 'REJECTED'} file '${fileData.fileName}' for ClientID: ${targetClientId}`);
+
     const targetUser = activeUsers.get(targetClientId);
     const updatePayload = {
       msgId,
@@ -283,68 +306,6 @@ function registerAdminSocketHandlers(io, socket, context) {
 
     if (callback) {
       callback({ success: true });
-    }
-  });
-
-  socket.on('file-upload-data', ({ msgId, targetClientId, fileName, fileDataUrl }, callback) => {
-    try {
-      const dbMsg = ChatDatabase.getMessageById(msgId);
-      if (!dbMsg) {
-        return callback && callback({ success: false, message: '未找到对应申请记录' });
-      }
-
-      const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-
-      const matches = fileDataUrl.match(/^data:(.+);base64,(.+)$/);
-      let buffer;
-      if (matches && matches[2]) {
-        buffer = Buffer.from(matches[2], 'base64');
-      } else {
-        buffer = Buffer.from(fileDataUrl);
-      }
-
-      const safeFileName = `${Date.now()}_${path.basename(fileName).replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
-      const filePath = path.join(uploadsDir, safeFileName);
-      fs.writeFileSync(filePath, buffer);
-
-      const fileUrl = `/uploads/${safeFileName}`;
-
-      let fileData = {};
-      try {
-        fileData = JSON.parse(dbMsg.text);
-      } catch (e) { }
-
-      fileData.fileStatus = 'completed';
-      fileData.fileUrl = fileUrl;
-
-      const updatedText = JSON.stringify(fileData);
-      ChatDatabase.updateMessageText(msgId, updatedText);
-
-      const payload = {
-        msgId,
-        targetClientId,
-        fileUrl,
-        fileData
-      };
-
-      const targetUser = activeUsers.get(targetClientId);
-      if (targetUser && targetUser.sockets) {
-        targetUser.sockets.forEach(sId => {
-          io.to(sId).emit('file-upload-finished', payload);
-        });
-      }
-
-      sendToAllAdmins('file-upload-finished', payload);
-
-      if (callback) {
-        callback({ success: true, fileUrl });
-      }
-    } catch (err) {
-      console.error('[FILE UPLOAD ERROR]', err);
-      if (callback) callback({ success: false, message: '保存文件失败' });
     }
   });
 

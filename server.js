@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const ChatDatabase = require('./db');
+const Logger = require('./logger');
 const createPublicRouter = require('./routes/public.routes');
 const createAdminRouter = require('./routes/admin.routes');
 const registerUserSocketHandlers = require('./sockets/user.socket');
@@ -104,6 +105,11 @@ try {
 } catch (err) {
   console.warn('[CONFIG] Failed to load config.json, using defaults', err.message);
 }
+
+if (config.log && config.log.level) {
+  Logger.setLevel(config.log.level);
+}
+Logger.info('LOGGER', `Logger initialized with level: '${Logger.getLevel()}'`);
 
 const PORT = process.env.PORT || config.port;
 const HOSTNAME = process.env.HOSTNAME || config.hostname;

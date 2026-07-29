@@ -6,6 +6,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const ChatDatabase = require('../db');
+const Logger = require('../logger');
 
 function createPublicRouter({ isUploadRateLimited, activeUsers, sendToAllAdmins, getAdminListWithStatus, io }) {
   const router = express.Router();
@@ -23,16 +24,19 @@ function createPublicRouter({ isUploadRateLimited, activeUsers, sendToAllAdmins,
     try {
       const clientIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
       if (isUploadRateLimited(clientIP)) {
+        Logger.warn('UPLOAD_RATE_LIMITED', `Upload rate limit exceeded for IP: ${clientIP}`);
         return res.status(429).json({ success: false, message: '上传频次过高，请 1 分钟后再试' });
       }
 
       const { fileName, fileDataUrl, msgId, targetClientId } = req.body;
       if (!fileName || !fileDataUrl) {
+        Logger.warn('UPLOAD_INVALID', `Missing filename or fileDataUrl from IP: ${clientIP}`);
         return res.status(400).json({ success: false, message: '文件数据缺失' });
       }
 
       const ext = (fileName || '').split('.').pop().toLowerCase();
       if (DANGEROUS_EXTENSIONS.has(ext) || !ALLOWED_EXTENSIONS.has(ext)) {
+        Logger.warn('UPLOAD_SECURITY_BLOCK', `Blocked dangerous file extension .${ext} from IP: ${clientIP}, File: '${fileName}'`);
         return res.status(400).json({ success: false, message: '安全阻断：禁止上传可执行脚本或危险类型文件 (.' + ext + ')' });
       }
 
@@ -54,7 +58,7 @@ function createPublicRouter({ isUploadRateLimited, activeUsers, sendToAllAdmins,
       fs.writeFileSync(filePath, buffer);
 
       const fileUrl = `/uploads/${safeFileName}`;
-      console.log(`[FILE UPLOAD SUCCESS] Saved ${safeFileName} to ${fileUrl}`);
+      Logger.info('UPLOAD_SUCCESS', `Saved file '${safeFileName}' (${buffer.length} bytes) to ${fileUrl} for ClientID: ${targetClientId || 'Unknown'} from IP: ${clientIP}`);
 
       if (msgId && targetClientId) {
         const dbMsg = ChatDatabase.getMessageById(msgId);
@@ -90,7 +94,7 @@ function createPublicRouter({ isUploadRateLimited, activeUsers, sendToAllAdmins,
 
       return res.json({ success: true, fileUrl });
     } catch (err) {
-      console.error('[API UPLOAD ERROR]', err);
+      Logger.error('UPLOAD_ERROR', `Exception saving upload:`, err);
       return res.status(500).json({ success: false, message: '保存文件失败: ' + err.message });
     }
   });
@@ -99,8 +103,10 @@ function createPublicRouter({ isUploadRateLimited, activeUsers, sendToAllAdmins,
   router.get('/admins', (req, res) => {
     try {
       const adminList = getAdminListWithStatus();
+      Logger.debug('PUBLIC_ADMINS_FETCH', `Fetched ${adminList.length} public admin profiles`);
       res.json({ success: true, adminList });
     } catch (err) {
+      Logger.error('PUBLIC_ADMINS_ERROR', err);
       res.status(500).json({ success: false, message: err.message });
     }
   });
