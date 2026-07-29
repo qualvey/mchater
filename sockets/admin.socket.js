@@ -55,7 +55,9 @@ function registerAdminSocketHandlers(io, socket, context) {
       }
 
       if (!payload && secretKey && secretKey === ADMIN_KEY) {
-        payload = { username: 'admin', role: 'super_admin' };
+        const superAdmin = ChatDatabase.getAllAdmins().find(a => a.role === 'super_admin');
+        const username = superAdmin ? superAdmin.username : 'admin';
+        payload = { username: username, role: 'super_admin' };
       }
 
       if (!payload) {

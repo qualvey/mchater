@@ -52,7 +52,7 @@ function createAdminRouter({ verifyAdminToken, signAdminToken, ADMIN_KEY, active
 
       if (!username || !password) {
         if (password === ADMIN_KEY || username === ADMIN_KEY) {
-          const superAdmin = ChatDatabase.getAdminByUsername('admin');
+          const superAdmin = ChatDatabase.getAllAdmins().find(a => a.role === 'super_admin') || ChatDatabase.getAdminByUsername('admin');
           if (superAdmin) {
             const newToken = signAdminToken(superAdmin.username, superAdmin.role);
             return res.json({
