@@ -133,8 +133,29 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // =========================================================================
-  // Secret Trigger Code Listener for Admin Login
+  // Secret Trigger Code Listener for Admin Login (Keyboard secret key & Mobile 5-tap gesture)
   // =========================================================================
+  const loginHeader = document.querySelector('.login-header');
+  let tapCount = 0;
+  let lastTapTime = 0;
+
+  if (loginHeader) {
+    loginHeader.addEventListener('click', () => {
+      const now = Date.now();
+      if (now - lastTapTime < 500) {
+        tapCount++;
+      } else {
+        tapCount = 1;
+      }
+      lastTapTime = now;
+
+      if (tapCount >= 5) {
+        tapCount = 0;
+        revealAdminLogin();
+      }
+    });
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.key && e.key.length === 1) {
       keySequence += e.key;
