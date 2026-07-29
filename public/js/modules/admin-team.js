@@ -1,6 +1,6 @@
 /**
  * Admin Team Module (public/js/modules/admin-team.js)
- * Encapsulates Admin Team Internal Communication (Lobby & Private Chat) & Account Management.
+ * Encapsulates Admin Team Internal Communication (Lobby & Private Chat), Account Management & Password Self-Service.
  */
 import { formatApiUrl } from '../core/config.js';
 import { sendDesktopNotification, playNotificationSound } from '../core/notif.js';
@@ -42,6 +42,17 @@ export class AdminTeamModule {
     this.newAdminUsername = document.getElementById('new-admin-username');
     this.newAdminPassword = document.getElementById('new-admin-password');
     this.adminAccountsList = document.getElementById('admin-accounts-list');
+
+    // Change Password DOM Elements
+    this.btnAdminChangePassword = document.getElementById('btn-admin-change-password');
+    this.adminChangePasswordModal = document.getElementById('admin-change-password-modal');
+    this.btnClosePwdModal = document.getElementById('btn-close-pwd-modal');
+    this.btnCancelPwd = document.getElementById('btn-cancel-pwd');
+    this.changePwdForm = document.getElementById('change-pwd-form');
+    this.inputOldPassword = document.getElementById('input-old-password');
+    this.inputNewPassword = document.getElementById('input-new-password');
+    this.inputConfirmPassword = document.getElementById('input-confirm-password');
+    this.changePwdMsg = document.getElementById('change-pwd-msg');
 
     this.bindEvents();
   }
@@ -93,6 +104,84 @@ export class AdminTeamModule {
         });
       });
     }
+
+    // Change Password Modal Event Bindings
+    if (this.btnAdminChangePassword) {
+      this.btnAdminChangePassword.addEventListener('click', () => {
+        if (this.currentAdminRole === 'super_admin') {
+          alert('🔑 提示：超级主管理员账号与密码由根目录下的 config.json 配置文件统一管理，无法在此修改。');
+          return;
+        }
+        if (this.adminChangePasswordModal) {
+          if (this.inputOldPassword) this.inputOldPassword.value = '';
+          if (this.inputNewPassword) this.inputNewPassword.value = '';
+          if (this.inputConfirmPassword) this.inputConfirmPassword.value = '';
+          if (this.changePwdMsg) this.changePwdMsg.style.display = 'none';
+          this.adminChangePasswordModal.classList.remove('hidden');
+        }
+      });
+    }
+
+    const closePwdModal = () => {
+      if (this.adminChangePasswordModal) this.adminChangePasswordModal.classList.add('hidden');
+    };
+
+    if (this.btnClosePwdModal) this.btnClosePwdModal.addEventListener('click', closePwdModal);
+    if (this.btnCancelPwd) this.btnCancelPwd.addEventListener('click', closePwdModal);
+
+    if (this.changePwdForm) {
+      this.changePwdForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const oldPassword = this.inputOldPassword ? this.inputOldPassword.value.trim() : '';
+        const newPassword = this.inputNewPassword ? this.inputNewPassword.value.trim() : '';
+        const confirmPassword = this.inputConfirmPassword ? this.inputConfirmPassword.value.trim() : '';
+
+        const showMsg = (msg, isSuccess = false) => {
+          if (this.changePwdMsg) {
+            this.changePwdMsg.style.display = 'block';
+            this.changePwdMsg.style.background = isSuccess ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)';
+            this.changePwdMsg.style.color = isSuccess ? '#4ade80' : '#f87171';
+            this.changePwdMsg.style.border = isSuccess ? '1px solid #22c55e' : '1px solid #ef4444';
+            this.changePwdMsg.textContent = msg;
+          }
+        };
+
+        if (!oldPassword || !newPassword) {
+          return showMsg('原密码与新密码不能为空');
+        }
+        if (newPassword.length < 4) {
+          return showMsg('新密码长度不能少于 4 个字符');
+        }
+        if (newPassword !== confirmPassword) {
+          return showMsg('两次输入的新密码不一致，请重新检查');
+        }
+
+        const profile = window.ChatStorageManager.getProfile();
+        const token = profile ? profile.adminToken : null;
+        fetch(formatApiUrl('/api/admin/change-password'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ oldPassword, newPassword })
+        })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            showMsg('🎉 密码修改成功！下次登录请使用新密码。', true);
+            setTimeout(() => {
+              closePwdModal();
+            }, 1600);
+          } else {
+            showMsg('修改失败: ' + res.message);
+          }
+        })
+        .catch(err => {
+          showMsg('网络请求异常: ' + err.message);
+        });
+      });
+    }
   }
 
   initTeamView(adminUsername, adminRole) {
@@ -114,6 +203,14 @@ export class AdminTeamModule {
         this.btnAdminManageUsers.style.display = 'inline-flex';
       } else {
         this.btnAdminManageUsers.style.display = 'none';
+      }
+    }
+
+    if (this.btnAdminChangePassword) {
+      if (this.currentAdminRole === 'super_admin') {
+        this.btnAdminChangePassword.title = '主管理密码由 config.json 配置';
+      } else {
+        this.btnAdminChangePassword.title = '修改我的管理员密码';
       }
     }
   }

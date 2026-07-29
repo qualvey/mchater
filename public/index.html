@@ -178,6 +178,7 @@
             <span class="admin-badge" id="admin-role-badge">管理员</span>
           </h3>
           <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn-icon" id="btn-admin-change-password" title="修改我的密码" style="padding: 4px 8px; font-size: 11px;">🔑 密码</button>
             <button class="btn-icon" id="btn-admin-manage-users" title="管理员账号管理 (主管理特权)" style="display:none; padding: 4px 8px; font-size: 11px;">👥 账号</button>
             <button class="btn-icon btn-danger btn-icon-only" id="btn-admin-logout" title="退出管理员账号">🚪</button>
           </div>
@@ -344,6 +345,42 @@
           </tbody>
         </table>
       </div>
+    </div>
+  </div>
+
+  <!-- Change Password Modal Overlay -->
+  <div id="admin-change-password-modal" class="modal-overlay hidden" style="z-index: 155;">
+    <div class="login-card" style="max-width: 400px; padding: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
+        <h3 style="display: flex; align-items: center; gap: 8px; font-size: 16px; color: var(--text-main);">
+          <span>🔑 修改管理员密码</span>
+        </h3>
+        <button id="btn-close-pwd-modal" class="btn-icon" style="padding: 4px 10px;">✕</button>
+      </div>
+
+      <form id="change-pwd-form" style="display: flex; flex-direction: column; gap: 14px;">
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-old-password" style="font-size: 12px; color: var(--text-muted);">原密码</label>
+          <input type="password" id="input-old-password" placeholder="请输入当前密码" required style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-new-password" style="font-size: 12px; color: var(--text-muted);">新密码</label>
+          <input type="password" id="input-new-password" placeholder="请输入新密码 (至少4位)" required style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 0;">
+          <label for="input-confirm-password" style="font-size: 12px; color: var(--text-muted);">确认新密码</label>
+          <input type="password" id="input-confirm-password" placeholder="请再次输入新密码" required style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+        </div>
+
+        <div id="change-pwd-msg" style="display: none; font-size: 12px; padding: 6px 10px; border-radius: 4px;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;">
+          <button type="button" id="btn-cancel-pwd" class="btn-icon" style="padding: 6px 14px; font-size: 13px;">取消</button>
+          <button type="submit" class="btn-submit" style="width: auto; padding: 6px 16px; font-size: 13px;">确认修改</button>
+        </div>
+      </form>
     </div>
   </div>
 

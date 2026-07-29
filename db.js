@@ -377,6 +377,25 @@ class ChatDatabase {
     return true;
   }
 
+  static updateAdminPassword(username, oldPassword, newPassword) {
+    const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+    if (!admin) {
+      throw new Error('管理员账号不存在');
+    }
+    if (admin.role === 'super_admin') {
+      throw new Error('超级主管理员密码由 config.json 配置文件管理，无法在此修改');
+    }
+    if (!verifyPassword(oldPassword, admin.password_hash)) {
+      throw new Error('原密码输入错误');
+    }
+    if (!newPassword || String(newPassword).length < 4) {
+      throw new Error('新密码长度至少为 4 个字符');
+    }
+    const newHash = hashPassword(newPassword);
+    db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(newHash, admin.id);
+    return true;
+  }
+
   // Admin Internal Messages Persistence
   static saveAdminInternalMessage(msg) {
     db.prepare(`

@@ -186,6 +186,26 @@ function createAdminRouter({ verifyAdminToken, signAdminToken, ADMIN_KEY, active
     }
   });
 
+  // REST API: Sub-Admin Self Change Password (Non-super_admin)
+  router.post('/change-password', adminAuthMiddleware, (req, res) => {
+    try {
+      const { oldPassword, newPassword } = req.body;
+      const username = req.admin ? req.admin.username : null;
+
+      if (!oldPassword || !newPassword) {
+        Logger.warn('ADMIN_CHANGE_PWD_FAILED', `Missing old or new password for username '${username}'`);
+        return res.status(400).json({ success: false, message: '原密码与新密码不能为空' });
+      }
+
+      ChatDatabase.updateAdminPassword(username, oldPassword, newPassword);
+      Logger.info('ADMIN_PASSWORD_CHANGED', `Admin '${username}' successfully changed their password`);
+      res.json({ success: true, message: '密码修改成功，请牢记新密码' });
+    } catch (err) {
+      Logger.warn('ADMIN_CHANGE_PWD_ERROR', `Password change error for '${req.admin ? req.admin.username : 'Unknown'}': ${err.message}`);
+      res.status(400).json({ success: false, message: err.message });
+    }
+  });
+
   return router;
 }
 
