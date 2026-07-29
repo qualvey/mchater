@@ -91,11 +91,13 @@ try {
 // Seed default super admin if no admin exists
 const stmtGetAdminCount = db.prepare('SELECT COUNT(*) as count FROM admins');
 if (stmtGetAdminCount.get().count === 0) {
+  let defaultAdminUsername = 'admin';
   let defaultAdminKey = 'admin123';
   try {
     const cfgPath = path.join(__dirname, 'config.json');
     if (fs.existsSync(cfgPath)) {
       const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (cfg.adminUsername) defaultAdminUsername = cfg.adminUsername.trim();
       if (cfg.adminKey) defaultAdminKey = cfg.adminKey;
     }
   } catch (e) {}
@@ -105,8 +107,8 @@ if (stmtGetAdminCount.get().count === 0) {
   db.prepare(`
     INSERT INTO admins (username, password_hash, role, created_at)
     VALUES (?, ?, ?, ?)
-  `).run('admin', pwdHash, 'super_admin', now);
-  console.log(`[DB INIT] Initialized default super admin 'admin' into SQLite.`);
+  `).run(defaultAdminUsername, pwdHash, 'super_admin', now);
+  console.log(`[DB INIT] Initialized default super admin '${defaultAdminUsername}' into SQLite.`);
 }
 
 // Prepared Statements

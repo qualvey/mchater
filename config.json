@@ -1,5 +1,6 @@
 {
   "port": 4000,
+  "adminUsername": "admin",
   "adminKey": "admin123",
   "adminTriggerCode": "sing"
 }

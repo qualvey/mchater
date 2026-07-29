@@ -106,6 +106,7 @@ try {
 
 const PORT = process.env.PORT || config.port;
 const HOSTNAME = process.env.HOSTNAME || config.hostname;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || config.adminUsername || 'admin';
 const ADMIN_KEY = process.env.ADMIN_KEY || config.adminKey;
 const ADMIN_TRIGGER_CODE = process.env.ADMIN_TRIGGER_CODE || config.adminTriggerCode;
 
@@ -771,6 +772,7 @@ io.on('connection', (socket) => {
 server.listen(PORT, HOSTNAME, () => {
   console.log(`=================================`);
   console.log(`💬 Chat Server running on http://${HOSTNAME}:${PORT}`);
+  console.log(`👤 Admin Username: ${ADMIN_USERNAME}`);
   console.log(`🔑 Admin key: ${ADMIN_KEY}`);
   console.log(`🔐 Admin Trigger Secret: ${ADMIN_TRIGGER_CODE}`);
   console.log(`💾 SQLite Database connected: chat.db`);
