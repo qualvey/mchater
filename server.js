@@ -260,8 +260,27 @@ setInterval(() => {
     }
   });
 
+  activeAdminsMap.forEach((admRecord, username) => {
+    const validSockets = new Set();
+    admRecord.sockets.forEach(sId => {
+      if (io.sockets.sockets.has(sId)) {
+        validSockets.add(sId);
+      }
+    });
+
+    if (admRecord.sockets.size !== validSockets.size) {
+      admRecord.sockets = validSockets;
+      if (validSockets.size === 0) {
+        activeAdminsMap.delete(username);
+      }
+      stateChanged = true;
+      console.log(`[CLEANUP ADMIN SOCKETS] Username: '${username}', Remaining: ${validSockets.size}`);
+    }
+  });
+
   if (stateChanged) {
     broadcastUserListToAdmins();
+    broadcastAdminStatusToUsers();
   }
 }, 15000);
 

@@ -326,6 +326,23 @@ function registerAdminSocketHandlers(io, socket, context) {
       }
     }
   });
+
+  // Admin Disconnect Listener
+  socket.on('disconnect', (reason) => {
+    if (socket.userRole === 'admin' && socket.adminUsername) {
+      const username = socket.adminUsername;
+      const admRecord = activeAdminsMap.get(username);
+      if (admRecord && admRecord.sockets) {
+        admRecord.sockets.delete(socket.id);
+        if (admRecord.sockets.size === 0) {
+          activeAdminsMap.delete(username);
+          Logger.info('ADMIN_OFFLINE', `Admin '${username}' is now OFFLINE (0 active sockets)`);
+        }
+      }
+      Logger.info('ADMIN_DISCONNECTED', `Admin '${username}' socket ${socket.id} disconnected: ${reason}`);
+      broadcastAdminStatusToUsers();
+    }
+  });
 }
 
 module.exports = registerAdminSocketHandlers;
