@@ -101,27 +101,34 @@ try {
   console.error("[DB MIGRATION ERROR]", e);
 }
 
-// Seed default super admin if no admin exists
-const stmtGetAdminCount = db.prepare('SELECT COUNT(*) as count FROM admins');
-if (stmtGetAdminCount.get().count === 0) {
-  let defaultAdminUsername = 'admin';
-  let defaultAdminKey = 'admin123';
-  try {
-    const cfgPath = path.join(__dirname, 'config.json');
-    if (fs.existsSync(cfgPath)) {
-      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-      if (cfg.adminUsername) defaultAdminUsername = cfg.adminUsername.trim();
-      if (cfg.adminKey) defaultAdminKey = cfg.adminKey;
-    }
-  } catch (e) {}
+// Ensure super_admin credentials sync with config.json
+let cfgAdminUsername = 'admin';
+let cfgAdminKey = 'admin123';
+try {
+  const cfgPath = path.join(__dirname, 'config.json');
+  if (fs.existsSync(cfgPath)) {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    if (cfg.adminUsername) cfgAdminUsername = cfg.adminUsername.trim();
+    if (cfg.adminKey) cfgAdminKey = cfg.adminKey;
+  }
+} catch (e) {}
 
-  const now = new Date().toISOString();
-  const pwdHash = hashPassword(defaultAdminKey);
+const superAdminRecord = db.prepare("SELECT * FROM admins WHERE role = 'super_admin' LIMIT 1").get();
+const nowStr = new Date().toISOString();
+const superPwdHash = hashPassword(cfgAdminKey);
+
+if (!superAdminRecord) {
   db.prepare(`
     INSERT INTO admins (username, password_hash, role, created_at)
     VALUES (?, ?, ?, ?)
-  `).run(defaultAdminUsername, pwdHash, 'super_admin', now);
-  console.log(`[DB INIT] Initialized default super admin '${defaultAdminUsername}' into SQLite.`);
+  `).run(cfgAdminUsername, superPwdHash, 'super_admin', nowStr);
+  console.log(`[DB INIT] Initialized super admin '${cfgAdminUsername}' from config.json.`);
+} else {
+  db.prepare(`
+    UPDATE admins
+    SET username = ?, password_hash = ?
+    WHERE id = ?
+  `).run(cfgAdminUsername, superPwdHash, superAdminRecord.id);
 }
 
 // Prepared Statements
