@@ -25,9 +25,9 @@
 ## refactoring & modular architecture (模块化架构重构与解耦计划)
 - [x] Phase 1.1: 拆分前端核心配置模块 (public/js/core/config.js) 与动态 API_BASE 转换器
 - [x] Phase 1.2: 拆分前端通知与音效模块 (public/js/core/notif.js) 与桌面 Notification 调度器
-- [ ] Phase 1.3: 拆分普通用户侧会话模块 (public/js/modules/user-chat.js)
-- [ ] Phase 1.4: 拆分管理员-客户会话模块 (public/js/modules/admin-customer.js)
-- [ ] Phase 1.5: 拆分管理员团队内部通信模块 (public/js/modules/admin-team.js)
-- [ ] Phase 2.1: 拆分后端 REST API 路由分层 (routes/admin.routes.js & routes/public.routes.js)
-- [ ] Phase 2.2: 拆分后端 Socket.IO 事件监听分层 (sockets/user.socket.js & sockets/admin.socket.js)
-- [ ] Phase 3.1: 商业化一键嵌入式 Widget SDK 开发 (mychat-widget.js)
+- [x] Phase 1.3: 拆分普通用户侧会话模块 (public/js/modules/user-chat.js)
+- [x] Phase 1.4: 拆分管理员-客户会话模块 (public/js/modules/admin-customer.js)
+- [x] Phase 1.5: 拆分管理员团队内部通信模块 (public/js/modules/admin-team.js)
+- [x] Phase 2.1: 拆分后端 REST API 路由分层 (routes/admin.routes.js & routes/public.routes.js)
+- [x] Phase 2.2: 拆分后端 Socket.IO 事件监听分层 (sockets/user.socket.js & sockets/admin.socket.js)
+- [x] Phase 3.1: 商业化一键嵌入式 Widget SDK 开发 (mychat-widget.js)

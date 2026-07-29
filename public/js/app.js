@@ -1,38 +1,32 @@
 /**
- * Main Application Logic for MyChat (Client & Admin)
- * Anchored by Device Fingerprint ID & SQLite Persistence
- * Includes Image Sending (Paste, Drag & Drop, File Upload, Lightbox Preview)
+ * Main Application Logic for MyChat (Client & Admin) - ES Module Orchestrator
+ * Modularized architecture delegating to user-chat, admin-customer, and admin-team modules.
  */
-document.addEventListener('DOMContentLoaded', () => {
-  // Dynamic Base Path & Host Helper (Supports Subpath / Proxy Deployment)
-  const getRawBase = () => {
-    if (typeof window.MYCHAT_BASE_PATH !== 'undefined') return window.MYCHAT_BASE_PATH;
-    const path = window.location.pathname;
-    return path.replace(/\/index\.html$/, '').replace(/\/$/, '');
-  };
-  const API_BASE = getRawBase().replace(/\/$/, '');
-  const formatApiUrl = (endpoint) => {
-    if (!endpoint) return '';
-    if (endpoint.startsWith('http://') || endpoint.startsWith('https://') || endpoint.startsWith('data:')) return endpoint;
-    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-    return `${API_BASE}${cleanEndpoint}`;
-  };
+import { API_BASE } from './core/config.js';
+import { requestNotificationPermission, sendDesktopNotification, playNotificationSound } from './core/notif.js';
+import { UserChatModule } from './modules/user-chat.js';
+import { AdminCustomerModule } from './modules/admin-customer.js';
+import { AdminTeamModule } from './modules/admin-team.js';
 
+document.addEventListener('DOMContentLoaded', () => {
   const socket = io({
     path: API_BASE ? `${API_BASE}/socket.io` : '/socket.io'
   });
 
-  // Device Fingerprint ID for this browser
-  const myDeviceId = DeviceFingerprint.getDeviceId();
+  const myDeviceId = window.DeviceFingerprint.getDeviceId();
 
   // State
   let currentRole = null; // 'user' | 'admin'
   let userProfile = null; // { nickname, reason, deviceId }
-  let adminSelectedClientId = null; // Admin selected clientId
-  let allAdminUsersMap = new Map(); // clientId -> { clientId, nickname, reason, online, lastSeen, nicknameHistory, ipHistory }
-  let typingTimer = null;
+  let currentAdminUsername = null;
+  let currentAdminRole = null;
   let keySequence = '';
-  let currentAdminKey = '';
+  let adminActiveSidebarTab = 'customers'; // 'customers' | 'team'
+
+  // Modules
+  const userChat = new UserChatModule(socket, myDeviceId);
+  const adminCustomer = new AdminCustomerModule(socket);
+  const adminTeam = new AdminTeamModule(socket);
 
   // DOM Elements - Modal & Forms
   const modalOverlay = document.getElementById('login-modal');
@@ -46,123 +40,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputAdminPassword = document.getElementById('input-admin-password');
   const loginError = document.getElementById('login-error');
   const errorText = document.getElementById('error-text');
-  let currentAdminRole = null;
-  let currentAdminUsername = null;
 
-  // DOM Elements - User View
+  // DOM Elements - Views & Buttons
   const userView = document.getElementById('user-view');
-  const userChatMain = document.getElementById('user-chat-main');
-  const userDragOverlay = document.getElementById('user-drag-overlay');
-  const userIdentityTag = document.getElementById('user-identity-tag');
-  const userReasonDisplay = document.getElementById('user-reason-display');
-  const userMessagesContainer = document.getElementById('user-messages');
-  const userInput = document.getElementById('user-input');
-  const userInputArea = document.getElementById('user-input-area');
-  const btnUserImage = document.getElementById('btn-user-image');
-  const userImageInput = document.getElementById('user-image-input');
-  const btnUserFile = document.getElementById('btn-user-file');
-  const userAnyfileInput = document.getElementById('user-anyfile-input');
-  const btnUserSend = document.getElementById('btn-user-send');
-  const btnUserLogout = document.getElementById('btn-user-logout');
-  const adminStatusDot = document.getElementById('admin-status-dot');
-  const adminStatusText = document.getElementById('admin-status-text');
-  const userTypingStatus = document.getElementById('user-typing-status');
-  const btnToggleAdminSelector = document.getElementById('btn-toggle-admin-selector');
-  const currentTargetAdminName = document.getElementById('current-target-admin-name');
-  const adminSelectorDropdown = document.getElementById('admin-selector-dropdown');
-  const adminOptionList = document.getElementById('admin-option-list');
-  const adminStatusLabel = document.getElementById('admin-status-label');
-  const currentTargetAvatar = document.getElementById('current-target-avatar');
-
-  let selectedTargetAdmin = 'all';
-  let availableAdminsList = [];
-
-  // DOM Elements - Admin View
   const adminView = document.getElementById('admin-view');
-  const adminChatMain = document.getElementById('admin-chat-main');
-  const adminDragOverlay = document.getElementById('admin-drag-overlay');
-  const adminDragIcon = document.getElementById('admin-drag-icon');
-  const adminDragTitle = document.getElementById('admin-drag-title');
-  const adminDragDesc = document.getElementById('admin-drag-desc');
-  const adminUserListContainer = document.getElementById('admin-user-list');
-  const adminUserList = adminUserListContainer;
-  const adminUserSearch = document.getElementById('admin-user-search');
-  const adminMessagesContainer = document.getElementById('admin-messages');
-  const adminInput = document.getElementById('admin-input');
-  const adminInputArea = document.getElementById('admin-input-area');
-  const btnAdminImage = document.getElementById('btn-admin-image');
-  const adminImageInput = document.getElementById('admin-image-input');
-  const btnAdminFile = document.getElementById('btn-admin-file');
-  const adminAnyfileInput = document.getElementById('admin-anyfile-input');
-  const btnAdminSend = document.getElementById('btn-admin-send');
+  const btnUserLogout = document.getElementById('btn-user-logout');
   const btnAdminLogout = document.getElementById('btn-admin-logout');
-  const btnClearTargetChat = document.getElementById('btn-clear-target-chat');
-  const adminTargetAvatar = document.getElementById('admin-target-avatar');
-  const adminTargetNickname = document.getElementById('admin-target-nickname');
-  const adminTargetStatus = document.getElementById('admin-target-status');
-  const adminTargetReasonBar = document.getElementById('admin-target-reason-bar');
-  const adminTargetReasonText = document.getElementById('admin-target-reason-text');
-  const adminTypingStatus = document.getElementById('admin-typing-status');
-  const btnAdminManageUsers = document.getElementById('btn-admin-manage-users');
-  const adminRoleBadge = document.getElementById('admin-role-badge');
-  const adminManagementModal = document.getElementById('admin-management-modal');
-  const btnCloseAdminModal = document.getElementById('btn-close-admin-modal');
-  const createAdminForm = document.getElementById('create-admin-form');
-  const newAdminUsername = document.getElementById('new-admin-username');
-  const newAdminPassword = document.getElementById('new-admin-password');
-  const adminAccountsList = document.getElementById('admin-accounts-list');
-  const btnToggleUserHistory = document.getElementById('btn-toggle-user-history');
-  const adminUserHistoryPanel = document.getElementById('admin-user-history-panel');
-  const historyNicknamesText = document.getElementById('history-nicknames-text');
-  const historyIpsText = document.getElementById('history-ips-text');
-  const btnMobileBackUsers = document.getElementById('btn-mobile-back-users');
 
-  // DOM Elements - Admin Team Sidebar Tabs
+  // DOM Elements - Admin Sidebar Tabs
   const adminTabCustomers = document.getElementById('admin-tab-customers');
   const adminTabTeam = document.getElementById('admin-tab-team');
   const customersUnreadBadge = document.getElementById('customers-unread-badge');
   const teamUnreadBadge = document.getElementById('team-unread-badge');
+  const adminUserList = document.getElementById('admin-user-list');
   const adminTeamList = document.getElementById('admin-team-list');
+  const adminUserSearch = document.getElementById('admin-user-search');
 
-  let adminActiveSidebarTab = 'customers'; // 'customers' | 'team'
-  let adminInternalTarget = 'ALL'; // 'ALL' | username
-  let allAdminInternalMessages = [];
-  let teamUnreadCount = 0;
-  let customersUnreadCount = 0;
-
-  // DOM Elements - Context Menu
-  const adminContextMenu = document.getElementById('admin-context-menu');
-  const ctxItemClear = document.getElementById('ctx-item-clear');
-  const ctxItemDelete = document.getElementById('ctx-item-delete');
-  let activeContextClientId = null;
-
-  // DOM Elements - Lightbox Modal
+  // Lightbox Modal
   const lightboxModal = document.getElementById('image-lightbox-modal');
   const lightboxImage = document.getElementById('lightbox-image-element');
   const btnCloseLightbox = document.getElementById('btn-close-lightbox');
-
-  // Audit history drawer toggle
-  if (btnToggleUserHistory && adminUserHistoryPanel) {
-    btnToggleUserHistory.addEventListener('click', () => {
-      const isHidden = adminUserHistoryPanel.style.display === 'none' || !adminUserHistoryPanel.style.display;
-      adminUserHistoryPanel.style.display = isHidden ? 'block' : 'none';
-    });
-  }
-
-  // Mobile Back Button to User List Sidebar
-  if (btnMobileBackUsers && adminView) {
-    btnMobileBackUsers.addEventListener('click', () => {
-      adminView.classList.remove('mobile-show-chat');
-    });
-  }
-
-  // Lightbox Handlers
-  function openImageLightbox(src) {
-    if (lightboxImage && lightboxModal) {
-      lightboxImage.src = src;
-      lightboxModal.classList.remove('hidden');
-    }
-  }
 
   if (btnCloseLightbox && lightboxModal) {
     btnCloseLightbox.addEventListener('click', () => {
@@ -171,179 +68,6 @@ document.addEventListener('DOMContentLoaded', () => {
     lightboxModal.addEventListener('click', (e) => {
       if (e.target === lightboxModal) {
         lightboxModal.classList.add('hidden');
-      }
-    });
-  }
-
-  // =========================================================================
-  // Client Image Helper (Compression & Canvas Reader)
-  // =========================================================================
-  function compressAndReadImage(file, maxWidth = 1200, quality = 0.75) {
-    return new Promise((resolve, reject) => {
-      if (!file || !file.type.startsWith('image/')) {
-        return reject(new Error('请选择或粘贴图片文件'));
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          let width = img.width;
-          let height = img.height;
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          const dataUrl = canvas.toDataURL('image/jpeg', quality);
-          resolve(dataUrl);
-        };
-        img.onerror = () => reject(new Error('图片加载失败'));
-        img.src = e.target.result;
-      };
-      reader.onerror = () => reject(new Error('读取文件失败'));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  // Bind Image Drag & Drop, Paste, and Click Events
-  function bindImageInputEvents(inputAreaEl, textareaEl, fileInputEl, btnImageEl, sendImageCallback) {
-    // Click button to select image
-    btnImageEl.addEventListener('click', () => {
-      if (!btnImageEl.disabled) {
-        fileInputEl.click();
-      }
-    });
-
-    // File input change
-    fileInputEl.addEventListener('change', async () => {
-      if (fileInputEl.files && fileInputEl.files[0]) {
-        try {
-          const dataUrl = await compressAndReadImage(fileInputEl.files[0]);
-          sendImageCallback(dataUrl);
-        } catch (err) {
-          alert(err.message);
-        }
-        fileInputEl.value = '';
-      }
-    });
-
-    // Paste image from clipboard
-    textareaEl.addEventListener('paste', async (e) => {
-      const items = (e.clipboardData || e.originalEvent.clipboardData)?.items;
-      if (!items) return;
-      for (let item of items) {
-        if (item.type && item.type.startsWith('image/')) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (file) {
-            try {
-              const dataUrl = await compressAndReadImage(file);
-              sendImageCallback(dataUrl);
-            } catch (err) {
-              alert(err.message);
-            }
-          }
-          break;
-        }
-      }
-    });
-
-    // Drag and Drop
-    inputAreaEl.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      inputAreaEl.classList.add('drag-over');
-    });
-
-    inputAreaEl.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      inputAreaEl.classList.remove('drag-over');
-    });
-
-    inputAreaEl.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      inputAreaEl.classList.remove('drag-over');
-      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-        const file = e.dataTransfer.files[0];
-        if (file.type && file.type.startsWith('image/')) {
-          try {
-            const dataUrl = await compressAndReadImage(file);
-            sendImageCallback(dataUrl);
-          } catch (err) {
-            alert(err.message);
-          }
-        }
-      }
-    });
-  }
-
-  // Prevent browser default window drop (prevents browser from navigating away if image is dropped outside)
-  window.addEventListener('dragover', (e) => e.preventDefault());
-  window.addEventListener('drop', (e) => e.preventDefault());
-
-  // Bind Full Window Image Drag & Drop Helper
-  function bindFullWindowDragDrop(containerEl, overlayEl, sendImageCallback, preCheckCallback = null) {
-    if (!containerEl || !overlayEl) return;
-    let dragCounter = 0;
-
-    containerEl.addEventListener('dragenter', (e) => {
-      e.preventDefault();
-      const types = Array.from(e.dataTransfer?.types || []);
-      if (types.includes('Files')) {
-        dragCounter++;
-        if (typeof preCheckCallback === 'function') {
-          preCheckCallback(false);
-        }
-        overlayEl.classList.add('active');
-      }
-    });
-
-    containerEl.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = 'copy';
-      }
-    });
-
-    containerEl.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      dragCounter--;
-      if (dragCounter <= 0) {
-        dragCounter = 0;
-        overlayEl.classList.remove('active');
-      }
-    });
-
-    containerEl.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      dragCounter = 0;
-      overlayEl.classList.remove('active');
-
-      if (typeof preCheckCallback === 'function' && !preCheckCallback(true)) {
-        return;
-      }
-
-      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
-        const file = e.dataTransfer.files[0];
-        if (file.type && file.type.startsWith('image/')) {
-          try {
-            const dataUrl = await compressAndReadImage(file);
-            sendImageCallback(dataUrl);
-          } catch (err) {
-            alert(err.message || '读取图片失败');
-          }
-        } else {
-          if (currentRole === 'user') {
-            sendUserFileRequest(file);
-          } else if (currentRole === 'admin' && adminSelectedClientId) {
-            sendAdminFileDirectly(file);
-          } else if (currentRole === 'admin' && !adminSelectedClientId) {
-            alert('请先在左侧侧边栏选择一个用户！');
-          }
-        }
       }
     });
   }
@@ -360,31 +84,36 @@ document.addEventListener('DOMContentLoaded', () => {
         clientId: myDeviceId 
       }, (res) => {
         if (res) {
-          updateAdminStatusUI(res);
+          userChat.updateAdminStatusUI(res);
           if (res.historyMessages) {
             syncUserOfflineMessages(res.historyMessages);
           }
         }
       });
     } else if (currentRole === 'admin') {
-      const existingProfile = ChatStorageManager.getProfile();
+      const existingProfile = window.ChatStorageManager.getProfile();
       const token = existingProfile ? existingProfile.adminToken : null;
       socket.emit('join-admin', { token, username: currentAdminUsername }, (res) => {
         if (res && res.success) {
           currentAdminUsername = res.username;
           currentAdminRole = res.role;
+          adminCustomer.currentAdminUsername = res.username;
+          adminCustomer.currentAdminRole = res.role;
+          adminTeam.initTeamView(res.username, res.role);
+
           if (res.allMessages) {
             syncAdminOfflineMessages(res.allMessages);
           }
           if (res.internalMessages) {
-            allAdminInternalMessages = res.internalMessages;
+            adminTeam.allAdminInternalMessages = res.internalMessages;
           }
           if (res.adminList) {
-            updateAdminStatusUI(res);
+            userChat.updateAdminStatusUI(res);
+            adminTeam.setAvailableAdmins(res.adminList);
           }
           if (res.users) {
-            updateAdminUsersMap(res.users);
-            renderAdminUserList();
+            adminCustomer.updateAdminUsersMap(res.users);
+            adminCustomer.renderUserList();
           }
         }
       });
@@ -393,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   socket.on('admin-force-logout', ({ message }) => {
     alert(message || '您的管理员账号已被主管理注销/断开连接');
-    ChatStorageManager.clearProfile();
+    window.ChatStorageManager.clearProfile();
     location.reload();
   });
 
@@ -402,66 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
       socket.emit('leave-user');
     }
   });
-
-  // =========================================================================
-  // Browser System Notification & Web Audio Sound Manager
-  // =========================================================================
-  function requestNotificationPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then(permission => {
-        console.log('[NOTIFICATION] Permission state:', permission);
-      });
-    }
-  }
-
-  function playNotificationSound() {
-    try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
-
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.3);
-    } catch (e) {
-      console.log('Notification audio play blocked or unsupported', e);
-    }
-  }
-
-  function sendDesktopNotification(title, options = {}, onClickCallback = null) {
-    playNotificationSound();
-
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-      return;
-    }
-
-    try {
-      const notif = new Notification(title, {
-        icon: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💬</text></svg>',
-        ...options
-      });
-
-      notif.onclick = () => {
-        window.focus();
-        if (typeof onClickCallback === 'function') {
-          onClickCallback();
-        }
-        notif.close();
-      };
-    } catch (e) {
-      console.error('Failed to dispatch notification', e);
-    }
-  }
 
   // =========================================================================
   // Secret Trigger Code Listener for Admin Login
@@ -494,16 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
     keySequence = '';
   }
 
-  // =========================================================================
   // Initial Local Storage Check
-  // =========================================================================
-  const lastUserInfo = ChatStorageManager.getLastUserInfo();
+  const lastUserInfo = window.ChatStorageManager.getLastUserInfo();
   if (lastUserInfo) {
     if (lastUserInfo.nickname && inputNickname) inputNickname.value = lastUserInfo.nickname;
     if (lastUserInfo.reason && inputReason) inputReason.value = lastUserInfo.reason;
   }
 
-  const savedProfile = ChatStorageManager.getProfile();
+  const savedProfile = window.ChatStorageManager.getProfile();
   if (savedProfile) {
     if (savedProfile.role === 'user' && savedProfile.nickname && savedProfile.reason) {
       inputNickname.value = savedProfile.nickname;
@@ -516,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clientId: myDeviceId 
       }, (joinRes) => {
         if (joinRes && joinRes.success) {
-          updateAdminStatusUI(joinRes);
+          userChat.updateAdminStatusUI(joinRes);
           if (joinRes.historyMessages) syncUserOfflineMessages(joinRes.historyMessages);
           initUserView();
         }
@@ -535,15 +202,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (res && res.success) {
           currentAdminUsername = res.username;
           currentAdminRole = res.role;
-          ChatStorageManager.saveProfile({
+          adminCustomer.currentAdminUsername = res.username;
+          adminCustomer.currentAdminRole = res.role;
+          adminTeam.initTeamView(res.username, res.role);
+
+          window.ChatStorageManager.saveProfile({
             role: 'admin',
             adminUsername: res.username,
             adminRole: res.role,
             adminToken: res.token
           });
           if (res.allMessages) syncAdminOfflineMessages(res.allMessages);
-          if (res.internalMessages) allAdminInternalMessages = res.internalMessages;
-          if (res.adminList) updateAdminStatusUI(res);
+          if (res.internalMessages) adminTeam.allAdminInternalMessages = res.internalMessages;
+          if (res.adminList) {
+            userChat.updateAdminStatusUI(res);
+            adminTeam.setAvailableAdmins(res.adminList);
+          }
           initAdminView(res.users || []);
         } else {
           showError((res && res.message) || '管理员身份凭证已失效，请重新输入密码登录');
@@ -560,9 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loginError.classList.add('hidden');
   }
 
-  // =========================================================================
   // Role Switch Tabs
-  // =========================================================================
   tabUserRole.addEventListener('click', () => {
     tabUserRole.classList.add('active');
     tabAdminRole.classList.remove('active');
@@ -582,44 +254,25 @@ document.addEventListener('DOMContentLoaded', () => {
   function syncUserOfflineMessages(historyMessages) {
     if (!Array.isArray(historyMessages)) return;
     if (historyMessages.length === 0) {
-      const key = ChatStorageManager.getChatKey(myDeviceId, 'user');
-      const existingLocal = ChatStorageManager.getMessages(myDeviceId, 'user');
+      const key = window.ChatStorageManager.getChatKey(myDeviceId, 'user');
+      const existingLocal = window.ChatStorageManager.getMessages(myDeviceId, 'user');
       if (existingLocal.length > 0) {
         localStorage.removeItem(key);
-        if (currentRole === 'user') renderUserMessages();
+        if (currentRole === 'user') userChat.renderMessages();
       }
       return;
     }
-    const existingLocal = ChatStorageManager.getMessages(myDeviceId, 'user');
+    const existingLocal = window.ChatStorageManager.getMessages(myDeviceId, 'user');
     const localMap = new Map(existingLocal.map(m => [m.id, m]));
     historyMessages.forEach(srvMsg => {
       localMap.set(srvMsg.id, srvMsg);
     });
     const merged = Array.from(localMap.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-    const key = ChatStorageManager.getChatKey(myDeviceId, 'user');
+    const key = window.ChatStorageManager.getChatKey(myDeviceId, 'user');
     localStorage.setItem(key, JSON.stringify(merged));
 
-    merged.forEach(async (m) => {
-      const parsed = parseFileMsg(m);
-      if (parsed && parsed.fileStatus === 'approved') {
-        let file = pendingFilesMap.get(m.id);
-        if (!file && window.IDBFileStore) {
-          file = await IDBFileStore.getFile(m.id);
-        }
-        if (file) {
-          try {
-            await uploadFileToServer(file, m.id, myDeviceId);
-            pendingFilesMap.delete(m.id);
-            if (window.IDBFileStore) await IDBFileStore.deleteFile(m.id);
-          } catch (err) {
-            console.error('Failed auto upload for approved file', err);
-          }
-        }
-      }
-    });
-
     if (currentRole === 'user') {
-      renderUserMessages();
+      userChat.renderMessages();
     }
   }
 
@@ -628,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Object.keys(allMessages).forEach(cId => {
       const srvMsgs = allMessages[cId];
       if (Array.isArray(srvMsgs) && srvMsgs.length > 0) {
-        const existingLocal = ChatStorageManager.getMessages(cId, 'admin');
+        const existingLocal = window.ChatStorageManager.getMessages(cId, 'admin');
         const localMap = new Map(existingLocal.map(m => [m.id, m]));
         let newCount = 0;
         srvMsgs.forEach(m => {
@@ -640,28 +293,26 @@ document.addEventListener('DOMContentLoaded', () => {
           localMap.set(m.id, m);
         });
         const merged = Array.from(localMap.values()).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        const key = ChatStorageManager.getChatKey(cId, 'admin');
+        const key = window.ChatStorageManager.getChatKey(cId, 'admin');
         localStorage.setItem(key, JSON.stringify(merged));
 
-        if (newCount > 0 && cId !== adminSelectedClientId) {
+        if (newCount > 0 && cId !== adminCustomer.adminSelectedClientId) {
           for (let i = 0; i < newCount; i++) {
-            ChatStorageManager.incrementUnreadCount(cId);
+            window.ChatStorageManager.incrementUnreadCount(cId);
           }
         }
       }
     });
 
     if (currentRole === 'admin') {
-      renderAdminUserList();
-      if (adminSelectedClientId) {
-        renderAdminChat();
+      adminCustomer.renderUserList();
+      if (adminCustomer.adminSelectedClientId) {
+        adminCustomer.renderChat();
       }
     }
   }
 
-  // =========================================================================
   // User Login Submit
-  // =========================================================================
   userLoginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     hideError();
@@ -687,10 +338,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         currentRole = 'user';
         userProfile = { nickname, reason, deviceId: myDeviceId };
-        ChatStorageManager.saveProfile({ role: 'user', nickname, reason, deviceId: myDeviceId });
+        window.ChatStorageManager.saveProfile({ role: 'user', nickname, reason, deviceId: myDeviceId });
 
-        updateAdminStatusUI(joinRes);
-
+        userChat.updateAdminStatusUI(joinRes);
         if (joinRes.historyMessages) {
           syncUserOfflineMessages(joinRes.historyMessages);
         }
@@ -700,9 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // =========================================================================
   // Admin Login Submit
-  // =========================================================================
   adminLoginForm.addEventListener('submit', (e) => {
     e.preventDefault();
     hideError();
@@ -755,21 +403,22 @@ document.addEventListener('DOMContentLoaded', () => {
       currentRole = 'admin';
       currentAdminUsername = res.username;
       currentAdminRole = res.role;
-      ChatStorageManager.saveProfile({
+      adminCustomer.currentAdminUsername = res.username;
+      adminCustomer.currentAdminRole = res.role;
+      adminTeam.initTeamView(res.username, res.role);
+
+      window.ChatStorageManager.saveProfile({
         role: 'admin',
         adminUsername: res.username,
         adminRole: res.role,
         adminToken: res.token
       });
 
-      if (res.allMessages) {
-        syncAdminOfflineMessages(res.allMessages);
-      }
-      if (res.internalMessages) {
-        allAdminInternalMessages = res.internalMessages;
-      }
+      if (res.allMessages) syncAdminOfflineMessages(res.allMessages);
+      if (res.internalMessages) adminTeam.allAdminInternalMessages = res.internalMessages;
       if (res.adminList) {
-        updateAdminStatusUI(res);
+        userChat.updateAdminStatusUI(res);
+        adminTeam.setAvailableAdmins(res.adminList);
       }
 
       initAdminView(res.users || []);
@@ -779,396 +428,33 @@ document.addEventListener('DOMContentLoaded', () => {
   btnUserLogout.addEventListener('click', () => {
     if (currentRole === 'user') {
       if (userProfile && (userProfile.nickname || userProfile.reason)) {
-        ChatStorageManager.saveLastUserInfo(userProfile.nickname, userProfile.reason);
+        window.ChatStorageManager.saveLastUserInfo(userProfile.nickname, userProfile.reason);
       }
       socket.emit('leave-user');
     }
-    ChatStorageManager.clearProfile();
+    window.ChatStorageManager.clearProfile();
     location.reload();
   });
   
   btnAdminLogout.addEventListener('click', () => {
-    ChatStorageManager.clearProfile();
+    window.ChatStorageManager.clearProfile();
     location.reload();
-  });
-
-  // =========================================================================
-  // User View Logic
-  // =========================================================================
-  function updateAdminStatusUI(data) {
-    let isOnline = false;
-    if (typeof data === 'boolean') {
-      isOnline = data;
-    } else if (data && typeof data === 'object') {
-      isOnline = Boolean(data.online);
-      if (Array.isArray(data.adminList)) {
-        availableAdminsList = data.adminList;
-      }
-    }
-
-    if (adminStatusDot) adminStatusDot.className = isOnline ? 'status-dot online' : 'status-dot';
-    if (adminStatusLabel) adminStatusLabel.textContent = isOnline ? '客服团队在线中' : '客服已离线 (有疑问可留言)';
-
-    renderAdminSelectorDropdown();
-  }
-
-  function stringToHslColor(str, s = 65, l = 55) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      hash = str.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const h = Math.abs(hash) % 360;
-    return `hsl(${h}, ${s}%, ${l}%)`;
-  }
-
-  function createAvatarSvg(name, role = 'user') {
-    const initial = String(name || 'U').trim().charAt(0).toUpperCase();
-    const bg1 = stringToHslColor(name || 'user', 70, 50);
-    const bg2 = stringToHslColor((name || 'user') + 'rev', 80, 40);
-
-    let icon = '👤';
-    if (role === 'super_admin') icon = '👑';
-    else if (role === 'admin') icon = '🎧';
-
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-      <defs>
-        <linearGradient id="grad_${initial}" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="${bg1}" />
-          <stop offset="100%" stop-color="${bg2}" />
-        </linearGradient>
-      </defs>
-      <circle cx="50" cy="50" r="48" fill="url(#grad_${initial})" stroke="rgba(255,255,255,0.25)" stroke-width="3" />
-      <text x="50" y="54" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="40" font-weight="bold" fill="#ffffff" text-anchor="middle" dominant-baseline="central">${initial}</text>
-      <circle cx="76" cy="76" r="18" fill="#1e293b" stroke="#ffffff" stroke-width="2" />
-      <text x="76" y="76" font-size="15" text-anchor="middle" dominant-baseline="central">${icon}</text>
-    </svg>`;
-
-    return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-  }
-
-  function renderAdminSelectorDropdown() {
-    if (!adminOptionList) return;
-    adminOptionList.innerHTML = '';
-
-    const autoDiv = document.createElement('div');
-    const isAutoSel = selectedTargetAdmin === 'all';
-    const anyOnline = availableAdminsList.some(a => a.online);
-    autoDiv.className = `admin-option-item ${isAutoSel ? 'selected' : ''}`;
-    autoDiv.innerHTML = `
-      <div class="admin-option-info">
-        <span class="status-dot ${anyOnline ? 'online' : ''}"></span>
-        <span>在线客服团队 (自动推荐)</span>
-      </div>
-      <span style="font-size:11px; color:var(--text-dim);">默认推荐</span>
-    `;
-    autoDiv.addEventListener('click', () => selectTargetAdmin('all', '在线客服团队 (自动)'));
-    adminOptionList.appendChild(autoDiv);
-
-    availableAdminsList.forEach(adm => {
-      const itemDiv = document.createElement('div');
-      const isSel = selectedTargetAdmin === adm.username;
-      itemDiv.className = `admin-option-item ${isSel ? 'selected' : ''}`;
-      const roleLabel = adm.role === 'super_admin' ? '主管' : '客服';
-      const displayName = adm.displayName || adm.username;
-      itemDiv.innerHTML = `
-        <div class="admin-option-info">
-          <img src="${createAvatarSvg(displayName, adm.role)}" class="user-avatar-img sm" style="margin-right: 6px;" />
-          <span class="status-dot ${adm.online ? 'online' : ''}"></span>
-          <span>${escapeHTML(displayName)}</span>
-        </div>
-        <span style="font-size:11px; color:${adm.online ? 'var(--accent-cyan)' : 'var(--text-dim)'};">${roleLabel} (${adm.online ? '在线' : '离线'})</span>
-      `;
-      itemDiv.addEventListener('click', () => selectTargetAdmin(adm.username, `专属客服: ${displayName}`));
-      adminOptionList.appendChild(itemDiv);
-    });
-  }
-
-  function selectTargetAdmin(username, displayName) {
-    selectedTargetAdmin = username;
-    if (currentTargetAdminName) currentTargetAdminName.textContent = displayName;
-    if (currentTargetAvatar) currentTargetAvatar.textContent = username === 'all' ? '🎧' : '👤';
-    if (adminSelectorDropdown) adminSelectorDropdown.classList.add('hidden');
-    renderAdminSelectorDropdown();
-  }
-
-  function fetchAdminListForUser() {
-    if (socket && socket.connected) {
-      socket.emit('get-admin-list', (res) => {
-        if (res && res.adminList) {
-          updateAdminStatusUI(res);
-        }
-      });
-    }
-    fetch(formatApiUrl('/api/admins'))
-      .then(r => r.json())
-      .then(res => {
-        if (res && res.success && Array.isArray(res.adminList)) {
-          updateAdminStatusUI(res);
-        }
-      })
-      .catch(err => console.error('[FETCH ADMINS ERROR]', err));
-  }
-
-  if (btnToggleAdminSelector) {
-    btnToggleAdminSelector.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (adminSelectorDropdown) {
-        const isOpening = adminSelectorDropdown.classList.contains('hidden');
-        adminSelectorDropdown.classList.toggle('hidden');
-        if (isOpening) {
-          fetchAdminListForUser();
-        }
-      }
-    });
-  }
-
-  document.addEventListener('click', (e) => {
-    if (adminSelectorDropdown && !adminSelectorDropdown.contains(e.target) && btnToggleAdminSelector && !btnToggleAdminSelector.contains(e.target)) {
-      adminSelectorDropdown.classList.add('hidden');
-    }
   });
 
   function initUserView() {
     modalOverlay.classList.add('hidden');
     userView.classList.remove('hidden');
     adminView.classList.add('hidden');
-
-    userIdentityTag.innerHTML = `<span class="user-pill-icon">👤</span><span class="user-pill-name">${escapeHTML(userProfile.nickname)}</span>`;
-    userIdentityTag.title = `当前用户昵称: ${userProfile.nickname}`;
-    userReasonDisplay.textContent = userProfile.reason;
-
-    fetchAdminListForUser();
-    renderUserMessages();
-
-    // User Text input Enter listener
-    userInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendUserMessage();
-      } else {
-        notifyTyping();
-      }
-    });
-
-    btnUserSend.addEventListener('click', sendUserMessage);
-
-    // Bind User Image Drag, Drop, Paste, File Click
-    bindImageInputEvents(
-      userInputArea,
-      userInput,
-      userImageInput,
-      btnUserImage,
-      (imageDataUrl) => sendUserImageMessage(imageDataUrl)
-    );
-
-    // Bind Full Window Image Drag & Drop for User View
-    bindFullWindowDragDrop(
-      userChatMain,
-      userDragOverlay,
-      (imageDataUrl) => sendUserImageMessage(imageDataUrl)
-    );
-
-    // User File Button Click
-    if (btnUserFile && userAnyfileInput) {
-      btnUserFile.addEventListener('click', () => userAnyfileInput.click());
-      userAnyfileInput.addEventListener('change', () => {
-        if (userAnyfileInput.files && userAnyfileInput.files[0]) {
-          sendUserFileRequest(userAnyfileInput.files[0]);
-          userAnyfileInput.value = '';
-        }
-      });
-    }
+    userChat.initView(userProfile);
   }
 
-  function renderUserMessages() {
-    const messages = ChatStorageManager.getMessages(myDeviceId, 'user');
-    userMessagesContainer.innerHTML = '';
-
-    if (messages.length === 0) {
-      userMessagesContainer.innerHTML = `
-        <div class="empty-placeholder">
-          <div class="icon">💬</div>
-          <p>消息按设备绑定并保存在本地，随时可与管理员沟通！</p>
-        </div>`;
-      return;
-    }
-
-    messages.forEach(msg => {
-      appendMessageBubble(userMessagesContainer, msg, msg.senderRole === 'user');
-    });
-
-    scrollToBottom(userMessagesContainer);
-  }
-
-  function sendUserMessage() {
-    const text = userInput.value.trim();
-    if (!text) return;
-
-    const msgObj = {
-      id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
-      clientId: myDeviceId,
-      fromNickname: userProfile.nickname,
-      msgType: 'text',
-      text: text,
-      timestamp: new Date().toISOString(),
-      senderRole: 'user',
-      targetAdminUsername: selectedTargetAdmin === 'all' ? null : selectedTargetAdmin
-    };
-
-    ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
-    renderUserMessages();
-    userInput.value = '';
-
-    socket.emit('user-message', msgObj);
-  }
-
-  function sendUserImageMessage(imageDataUrl) {
-    const msgObj = {
-      id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
-      clientId: myDeviceId,
-      fromNickname: userProfile.nickname,
-      msgType: 'image',
-      text: imageDataUrl,
-      timestamp: new Date().toISOString(),
-      senderRole: 'user',
-      targetAdminUsername: selectedTargetAdmin === 'all' ? null : selectedTargetAdmin
-    };
-
-    ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
-    renderUserMessages();
-
-    socket.emit('user-message', msgObj);
-  }
-
-  // Socket: Admin Status Change -> User & Admin Views
-  socket.on('admin-status-change', (data) => {
-    updateAdminStatusUI(data);
-    if (currentRole === 'admin' && adminActiveSidebarTab === 'team') {
-      renderAdminTeamList();
-    }
-  });
-
-  // Socket: Incoming Admin Message -> User View
-  socket.on('new-admin-message', (msgObj) => {
-    if (currentRole === 'user') {
-      ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
-      renderUserMessages();
-
-      const notifBody = msgObj.text.startsWith('data:image/') ? '[图片消息]' : msgObj.text;
-      sendDesktopNotification('💬 来自管理员的新消息', {
-        body: notifBody,
-        tag: 'admin-reply'
-      });
-    }
-  });
-
-  // Socket: Admin Typing -> User View
-  socket.on('admin-typing', ({ isTyping }) => {
-    if (currentRole === 'user' && userTypingStatus) {
-      userTypingStatus.style.display = isTyping ? 'block' : 'none';
-    }
-  });
-
-  // Socket: Admin Bilateral Session Deletion -> User View
-  socket.on('session-deleted-by-admin', () => {
-    if (currentRole === 'user') {
-      ChatStorageManager.clearMessages(myDeviceId, 'user');
-      renderUserMessages();
-      sendDesktopNotification('⚠️ 会话已重置', {
-        body: '管理员已彻底清空/双向删除该会话记录',
-        tag: 'session-deleted'
-      });
-    }
-  });
-
-  socket.on('session-cleared-by-admin', () => {
-    if (currentRole === 'user') {
-      ChatStorageManager.clearMessages(myDeviceId, 'user');
-      renderUserMessages();
-    }
-  });
-
-  // Socket: Incoming Admin Internal Message -> Admin View
-  socket.on('new-admin-internal-message', (msgObj) => {
-    if (currentRole !== 'admin') return;
-
-    if (!allAdminInternalMessages.some(m => m.id === msgObj.id)) {
-      allAdminInternalMessages.push(msgObj);
-    }
-
-    if (adminActiveSidebarTab === 'team') {
-      renderAdminInternalChat();
-    } else {
-      playNotificationSound();
-      teamUnreadCount++;
-      if (teamUnreadBadge) {
-        teamUnreadBadge.textContent = teamUnreadCount;
-        teamUnreadBadge.classList.remove('hidden');
-      }
-      sendDesktopNotification(`👥 来自管理员 ${msgObj.senderUsername} 的内部消息`, {
-        body: msgObj.text,
-        tag: 'internal-msg'
-      });
-    }
-  });
-
-  // Socket: Admin Sent Message Echo -> Sync to all connected admins
-  socket.on('admin-message-sent', (msgObj) => {
-    if (currentRole === 'admin') {
-      const clientId = msgObj.targetClientId;
-      ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
-
-      if (adminSelectedClientId === clientId) {
-        renderAdminChat();
-      }
-      renderAdminUserList();
-    }
-  });
-
-  
-  
-
-  // =========================================================================
-  // Admin View Logic
-  // =========================================================================
   function initAdminView(serverUsers) {
     modalOverlay.classList.add('hidden');
     adminView.classList.remove('hidden');
     userView.classList.add('hidden');
 
-    if (adminRoleBadge) {
-      if (currentAdminRole === 'super_admin') {
-        adminRoleBadge.textContent = '客服主管';
-        adminRoleBadge.classList.add('super');
-      } else {
-        adminRoleBadge.textContent = '客服专员';
-        adminRoleBadge.classList.remove('super');
-      }
-    }
-
-    if (btnAdminManageUsers) {
-      if (currentAdminRole === 'super_admin') {
-        btnAdminManageUsers.style.display = 'inline-flex';
-        btnAdminManageUsers.addEventListener('click', () => {
-          if (adminManagementModal) {
-            adminManagementModal.classList.remove('hidden');
-            fetchAdminAccountsList();
-          }
-        });
-      } else {
-        btnAdminManageUsers.style.display = 'none';
-      }
-    }
-
-    if (btnCloseAdminModal) {
-      btnCloseAdminModal.addEventListener('click', () => {
-        if (adminManagementModal) adminManagementModal.classList.add('hidden');
-      });
-    }
-
-    updateAdminUsersMap(serverUsers);
-    fetchAdminListForUser();
-    renderAdminUserList();
+    adminCustomer.updateAdminUsersMap(serverUsers);
+    adminCustomer.renderUserList();
 
     if (adminTabCustomers) {
       adminTabCustomers.addEventListener('click', () => {
@@ -1178,10 +464,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminUserList) adminUserList.classList.remove('hidden');
         if (adminTeamList) adminTeamList.classList.add('hidden');
         if (adminUserSearch) adminUserSearch.placeholder = '搜索用户昵称/ID/原因...';
-        customersUnreadCount = 0;
+        adminCustomer.customersUnreadCount = 0;
         if (customersUnreadBadge) customersUnreadBadge.classList.add('hidden');
-        if (adminSelectedClientId) {
-          selectUserForAdmin(adminSelectedClientId);
+        if (adminCustomer.adminSelectedClientId) {
+          adminCustomer.selectUserForAdmin(adminCustomer.adminSelectedClientId);
         }
       });
     }
@@ -1194,761 +480,168 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminTeamList) adminTeamList.classList.remove('hidden');
         if (adminUserList) adminUserList.classList.add('hidden');
         if (adminUserSearch) adminUserSearch.placeholder = '搜索团队成员...';
-        teamUnreadCount = 0;
+        adminTeam.teamUnreadCount = 0;
         if (teamUnreadBadge) teamUnreadBadge.classList.add('hidden');
 
-        fetchAdminListForUser();
-        renderAdminTeamList();
-        selectAdminInternalTarget(adminInternalTarget);
+        adminTeam.fetchAdminList();
+        adminTeam.renderTeamList();
+        adminTeam.selectAdminInternalTarget(adminTeam.adminInternalTarget);
       });
     }
 
-    // Auto-select user with highest unread or first available user if none selected
-    if (!adminSelectedClientId && allAdminUsersMap.size > 0) {
-      const usersList = Array.from(allAdminUsersMap.values());
+    if (!adminCustomer.adminSelectedClientId && adminCustomer.allAdminUsersMap.size > 0) {
+      const usersList = Array.from(adminCustomer.allAdminUsersMap.values());
       usersList.sort((a, b) => {
-        const unreadA = ChatStorageManager.getUnreadCount(a.clientId);
-        const unreadB = ChatStorageManager.getUnreadCount(b.clientId);
+        const unreadA = window.ChatStorageManager.getUnreadCount(a.clientId);
+        const unreadB = window.ChatStorageManager.getUnreadCount(b.clientId);
         if (unreadB !== unreadA) return unreadB - unreadA;
         return (b.online ? 1 : 0) - (a.online ? 1 : 0);
       });
       if (usersList.length > 0) {
-        selectUserForAdmin(usersList[0].clientId);
+        adminCustomer.selectUserForAdmin(usersList[0].clientId);
       }
     }
+  }
 
-    adminUserSearch.addEventListener('input', () => {
-      if (adminActiveSidebarTab === 'team') {
-        renderAdminTeamList();
-      } else {
-        renderAdminUserList();
-      }
-    });
+  // Socket Events Delegation
+  socket.on('admin-status-change', (data) => {
+    userChat.updateAdminStatusUI(data);
+    if (data && data.adminList) {
+      adminTeam.setAvailableAdmins(data.adminList);
+    }
+    if (currentRole === 'admin' && adminActiveSidebarTab === 'team') {
+      adminTeam.renderTeamList();
+    }
+  });
 
-    adminInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendAdminMessage();
-      } else {
-        notifyTyping();
-      }
-    });
+  socket.on('new-admin-message', (msgObj) => {
+    if (currentRole === 'user') {
+      window.ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
+      userChat.renderMessages();
 
-    btnAdminSend.addEventListener('click', sendAdminMessage);
-
-    btnClearTargetChat.addEventListener('click', () => {
-      if (adminSelectedClientId && confirm(`确定要彻底清空与该设备 (${adminSelectedClientId}) 的本地聊天记录吗？`)) {
-        ChatStorageManager.clearMessages(adminSelectedClientId, 'admin');
-        renderAdminChat();
-      }
-    });
-
-    // Bind Admin Image Drag, Drop, Paste, File Click
-    bindImageInputEvents(
-      adminInputArea,
-      adminInput,
-      adminImageInput,
-      btnAdminImage,
-      (imageDataUrl) => sendAdminImageMessage(imageDataUrl)
-    );
-
-    // Admin File Button Click
-    if (btnAdminFile && adminAnyfileInput) {
-      btnAdminFile.addEventListener('click', () => {
-        if (!btnAdminFile.disabled) adminAnyfileInput.click();
-      });
-      adminAnyfileInput.addEventListener('change', () => {
-        if (adminAnyfileInput.files && adminAnyfileInput.files[0] && adminSelectedClientId) {
-          sendAdminFileDirectly(adminAnyfileInput.files[0]);
-          adminAnyfileInput.value = '';
-        }
+      const notifBody = msgObj.text.startsWith('data:image/') ? '[图片消息]' : msgObj.text;
+      sendDesktopNotification('💬 来自管理员的新消息', {
+        body: notifBody,
+        tag: 'admin-reply'
       });
     }
+  });
 
-    // Bind Full Window Image Drag & Drop for Admin View
-    bindFullWindowDragDrop(
-      adminChatMain,
-      adminDragOverlay,
-      (imageDataUrl) => sendAdminImageMessage(imageDataUrl),
-      (isDropping = false) => {
-        if (!adminSelectedClientId) {
-          if (adminDragTitle) adminDragTitle.textContent = '⚠️ 请先选择目标用户';
-          if (adminDragDesc) adminDragDesc.textContent = '请在左侧侧边栏点击选择一个用户后再拖放文件';
-          if (adminDragIcon) adminDragIcon.textContent = '⚠️';
-          if (isDropping) {
-            alert('请先在左侧侧边栏选择一个用户！');
-          }
-          return false;
-        } else {
-          const userObj = allAdminUsersMap.get(adminSelectedClientId);
-          const targetName = userObj ? userObj.nickname : '用户';
-          if (adminDragTitle) adminDragTitle.textContent = '释放文件即可发送';
-          if (adminDragDesc) adminDragDesc.textContent = `将发送给: ${targetName}`;
-          if (adminDragIcon) adminDragIcon.textContent = '📥';
-          return true;
-        }
-      }
-    );
-  }
-
-  function updateAdminUsersMap(serverUsers) {
-    serverUsers.forEach(u => {
-      allAdminUsersMap.set(u.clientId, u);
-    });
-
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key.startsWith('mychat_history_admin_')) {
-        const clientIdKey = key.replace('mychat_history_admin_', '');
-        const msgs = ChatStorageManager.getMessages(clientIdKey, 'admin');
-        if (msgs.length > 0) {
-          const lastMsg = msgs[msgs.length - 1];
-          const reason = lastMsg.reason || '无记录';
-          if (!allAdminUsersMap.has(clientIdKey)) {
-            allAdminUsersMap.set(clientIdKey, {
-              clientId: clientIdKey,
-              nickname: lastMsg.fromNickname || '未知设备',
-              reason: reason,
-              online: false,
-              lastSeen: lastMsg.timestamp,
-              nicknameHistory: [],
-              ipHistory: []
-            });
-          }
-        }
-      }
+  socket.on('admin-typing', ({ isTyping }) => {
+    if (currentRole === 'user' && userChat.userTypingStatus) {
+      userChat.userTypingStatus.style.display = isTyping ? 'block' : 'none';
     }
-  }
+  });
 
-  function renderAdminUserList() {
-    const filterText = adminUserSearch.value.trim().toLowerCase();
-    adminUserListContainer.innerHTML = '';
-
-    const users = Array.from(allAdminUsersMap.values()).filter(u => {
-      return u.nickname.toLowerCase().includes(filterText) || 
-             u.clientId.toLowerCase().includes(filterText) ||
-             (u.reason && u.reason.toLowerCase().includes(filterText));
-    });
-
-    if (users.length === 0) {
-      adminUserListContainer.innerHTML = `
-        <div class="empty-placeholder" style="margin-top: 30px;">
-          <p>未搜到相关设备或用户</p>
-        </div>`;
-      return;
-    }
-
-    users.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
-
-    users.forEach(u => {
-      const isSelected = u.clientId === adminSelectedClientId;
-      const unreadCount = ChatStorageManager.getUnreadCount(u.clientId);
-
-      const itemEl = document.createElement('div');
-      itemEl.className = `user-item ${isSelected ? 'active' : ''}`;
-      itemEl.innerHTML = `
-        <div class="user-item-top">
-          <span class="user-item-name">
-            <span class="status-dot ${u.online ? 'online' : ''}"></span>
-            ${escapeHTML(u.nickname)}
-            <span style="font-size:10px; color:var(--text-dim); margin-left:4px;" title="设备指纹ID: ${escapeHTML(u.clientId)}">[ID: ${escapeHTML(u.clientId.substring(0, 10))}]</span>
-          </span>
-          ${unreadCount > 0 ? `<span class="unread-pill">${unreadCount}</span>` : ''}
-        </div>
-        <div class="user-item-reason" title="${escapeHTML(u.reason || '')}">
-          求助: ${escapeHTML(u.reason || '未填写')}
-        </div>
-      `;
-
-      itemEl.addEventListener('click', () => {
-        selectUserForAdmin(u.clientId);
+  socket.on('session-deleted-by-admin', () => {
+    if (currentRole === 'user') {
+      window.ChatStorageManager.clearMessages(myDeviceId, 'user');
+      userChat.renderMessages();
+      sendDesktopNotification('⚠️ 会话已重置', {
+        body: '管理员已彻底清空/双向删除该会话记录',
+        tag: 'session-deleted'
       });
-
-      itemEl.addEventListener('contextmenu', (e) => {
-        showContextMenu(e, u.clientId);
-      });
-
-      adminUserListContainer.appendChild(itemEl);
-    });
-  }
-
-  function selectUserForAdmin(clientId) {
-    adminSelectedClientId = clientId;
-    ChatStorageManager.clearUnreadCount(clientId);
-    renderAdminUserList();
-
-    const userObj = allAdminUsersMap.get(clientId);
-    const displayName = userObj ? userObj.nickname : '未知设备';
-
-    adminTargetAvatar.textContent = displayName.charAt(0).toUpperCase();
-    adminTargetNickname.innerHTML = `${escapeHTML(displayName)} <span style="font-size:11px; font-weight:normal; color:var(--text-dim);">(${escapeHTML(clientId)})</span>`;
-    adminTargetStatus.innerHTML = userObj && userObj.online 
-      ? `<span class="status-dot online"></span> 状态：在线`
-      : `<span class="status-dot"></span> 状态：离线 ${userObj && userObj.lastSeen ? '(上次在线: ' + formatTime(userObj.lastSeen) + ')' : ''}`;
-
-    adminTargetReasonBar.style.display = 'flex';
-    adminTargetReasonText.textContent = userObj ? (userObj.reason || '未填写') : '无';
-    btnClearTargetChat.style.display = 'inline-flex';
-
-    if (userObj) {
-      const nicks = (userObj.nicknameHistory || []).map(n => escapeHTML(n.nickname));
-      const ips = (userObj.ipHistory || []).map(i => `${escapeHTML(i.ip_address)} (${formatTime(i.logged_in_at)})`);
-
-      historyNicknamesText.innerHTML = nicks.length > 0 ? nicks.join(' <span style="color:var(--text-dim);">➔</span> ') : escapeHTML(userObj.nickname);
-      historyIpsText.innerHTML = ips.length > 0 ? ips.join(' | ') : escapeHTML(userObj.lastIp || '127.0.0.1');
     }
+  });
 
-    adminInput.disabled = false;
-    btnAdminSend.disabled = false;
-    btnAdminImage.disabled = false;
-    if (btnAdminFile) btnAdminFile.disabled = false;
-
-    if (adminView) {
-      adminView.classList.add('mobile-show-chat');
+  socket.on('session-cleared-by-admin', () => {
+    if (currentRole === 'user') {
+      window.ChatStorageManager.clearMessages(myDeviceId, 'user');
+      userChat.renderMessages();
     }
+  });
 
-    renderAdminChat();
-  }
+  socket.on('new-admin-internal-message', (msgObj) => {
+    if (currentRole !== 'admin') return;
+    adminTeam.onNewInternalMessage(msgObj, adminActiveSidebarTab === 'team');
+  });
 
-  function renderAdminChat() {
-    adminMessagesContainer.innerHTML = '';
-    if (!adminSelectedClientId) return;
+  socket.on('admin-message-sent', (msgObj) => {
+    if (currentRole === 'admin') {
+      const clientId = msgObj.targetClientId;
+      window.ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
 
-    const messages = ChatStorageManager.getMessages(adminSelectedClientId, 'admin');
-
-    if (messages.length === 0) {
-      adminMessagesContainer.innerHTML = `
-        <div class="empty-placeholder">
-          <div class="icon">💬</div>
-          <p>尚无消息记录，主动发一条吧！</p>
-        </div>`;
-      return;
-    }
-
-    messages.forEach(msg => {
-      appendMessageBubble(adminMessagesContainer, msg, msg.senderRole === 'admin');
-    });
-
-    scrollToBottom(adminMessagesContainer);
-  }
-
-  function sendAdminMessage() {
-    const text = adminInput.value.trim();
-    if (!text) return;
-
-    if (adminActiveSidebarTab === 'team') {
-      const msgObj = {
-        id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
-        senderUsername: currentAdminUsername,
-        receiverUsername: adminInternalTarget,
-        text: text,
-        timestamp: new Date().toISOString()
-      };
-
-      socket.emit('admin-internal-message', msgObj);
-      adminInput.value = '';
-      return;
-    }
-
-    if (!adminSelectedClientId) return;
-
-    const userObj = allAdminUsersMap.get(adminSelectedClientId);
-
-    const msgObj = {
-      id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
-      targetClientId: adminSelectedClientId,
-      targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
-      msgType: 'text',
-      reason: userObj ? userObj.reason : '',
-      text: text,
-      timestamp: new Date().toISOString(),
-      senderRole: 'admin'
-    };
-
-    ChatStorageManager.saveMessage(adminSelectedClientId, msgObj, 'admin');
-    renderAdminChat();
-    adminInput.value = '';
-
-    socket.emit('admin-message', msgObj);
-  }
-
-  function renderAdminTeamList() {
-    if (!adminTeamList) return;
-    adminTeamList.innerHTML = '';
-    const filterText = (adminUserSearch ? adminUserSearch.value : '').trim().toLowerCase();
-
-    const hallDiv = document.createElement('div');
-    const isHallSel = adminInternalTarget === 'ALL';
-    hallDiv.className = `user-item ${isHallSel ? 'active' : ''}`;
-    const anyOnline = availableAdminsList.some(a => a.online);
-    hallDiv.innerHTML = `
-      <div class="user-avatar" style="background: linear-gradient(135deg, #8b5cf6, #ec4899);">📢</div>
-      <div class="user-info">
-        <div class="user-header">
-          <span class="user-name">团队内部大厅 (全员频道)</span>
-          <span class="admin-internal-tag">内部</span>
-        </div>
-        <div class="user-reason">管理员团队公共内部群聊</div>
-      </div>
-    `;
-    hallDiv.addEventListener('click', () => selectAdminInternalTarget('ALL'));
-    
-    if (!filterText || '团队内部大厅 全员频道 公共群聊'.includes(filterText)) {
-      adminTeamList.appendChild(hallDiv);
-    }
-
-    availableAdminsList.forEach(adm => {
-      if (adm.username === currentAdminUsername) return;
-      const displayName = adm.displayName || adm.username;
-      if (filterText && !displayName.toLowerCase().includes(filterText) && !adm.username.toLowerCase().includes(filterText) && !(adm.role || '').toLowerCase().includes(filterText)) {
-        return;
+      if (adminCustomer.adminSelectedClientId === clientId) {
+        adminCustomer.renderChat();
       }
-      const isSel = adminInternalTarget === adm.username;
-      const admDiv = document.createElement('div');
-      admDiv.className = `user-item ${isSel ? 'active' : ''}`;
-      const isSuper = adm.role === 'super_admin';
-      admDiv.innerHTML = `
-        <img src="${createAvatarSvg(displayName, adm.role)}" class="user-avatar-img" style="margin-right: 8px;" />
-        <div class="user-info">
-          <div class="user-header">
-            <span class="user-name">${escapeHTML(displayName)}</span>
-            <span class="status-dot ${adm.online ? 'online' : ''}"></span>
-          </div>
-          <div class="user-reason">${isSuper ? '客服主管' : '客服专员'} (${adm.online ? '在线' : '离线'})</div>
-        </div>
-      `;
-      admDiv.addEventListener('click', () => selectAdminInternalTarget(adm.username));
-      adminTeamList.appendChild(admDiv);
-    });
-  }
-
-  function fetchAdminAccountsList() {
-    const profile = ChatStorageManager.getProfile();
-    const token = profile ? profile.adminToken : null;
-    fetch(formatApiUrl('/api/admin/list'), {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(r => r.json())
-    .then(res => {
-      if (res && res.success && Array.isArray(res.admins)) {
-        renderAdminAccountsList(res.admins);
-      }
-    })
-    .catch(err => console.error('[FETCH ADMIN ACCOUNTS ERROR]', err));
-  }
-
-  function renderAdminAccountsList(admins) {
-    if (!adminAccountsList) return;
-    adminAccountsList.innerHTML = '';
-
-    admins.forEach(adm => {
-      const tr = document.createElement('tr');
-      tr.className = 'admin-table-row';
-      const isSuper = adm.role === 'super_admin';
-      const currentName = adm.display_name || adm.username;
-
-      tr.innerHTML = `
-        <td style="padding: 10px 12px; font-weight: 600; color: var(--text-main); font-family: monospace;">
-          <img src="${createAvatarSvg(currentName, adm.role)}" class="user-avatar-img sm" style="vertical-align: middle; margin-right: 6px;" />
-          ${escapeHTML(adm.username)}
-        </td>
-        <td style="padding: 10px 12px;">
-          <div style="display: flex; gap: 6px; align-items: center;">
-            <input type="text" class="input-display-name" value="${escapeHTML(currentName)}" placeholder="输入显示名称" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 4px 8px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 12px; width: 120px;">
-            <button type="button" class="btn-icon btn-save-name" style="padding: 4px 8px; font-size: 11px;">💾 保存</button>
-          </div>
-        </td>
-        <td style="padding: 10px 12px;">
-          <span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '客服主管' : '客服专员'}</span>
-        </td>
-        <td style="padding: 10px 12px; text-align: right;">
-          ${isSuper ? '<span style="font-size:11px; color:var(--text-dim);">不可删除</span>' : `<button type="button" class="btn-icon btn-danger btn-delete-admin" data-username="${escapeHTML(adm.username)}" style="padding: 4px 8px; font-size: 11px;">🗑️ 删除</button>`}
-        </td>
-      `;
-
-      const btnSave = tr.querySelector('.btn-save-name');
-      const inputName = tr.querySelector('.input-display-name');
-      btnSave.addEventListener('click', () => {
-        const newName = inputName.value.trim();
-        const profile = ChatStorageManager.getProfile();
-        const token = profile ? profile.adminToken : null;
-        fetch(formatApiUrl('/api/admin/update-display-name'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ username: adm.username, displayName: newName })
-        })
-        .then(r => r.json())
-        .then(res => {
-          if (res.success) {
-            alert(`已成功更新 ${adm.username} 的显示名称为 "${newName || adm.username}"`);
-            fetchAdminAccountsList();
-            fetchAdminListForUser();
-          } else {
-            alert('更新显示名称失败: ' + res.message);
-          }
-        });
-      });
-
-      const btnDelete = tr.querySelector('.btn-delete-admin');
-      if (btnDelete) {
-        btnDelete.addEventListener('click', () => {
-          if (confirm(`确定要删除管理员账号 (${adm.username}) 吗？`)) {
-            const profile = ChatStorageManager.getProfile();
-            const token = profile ? profile.adminToken : null;
-            fetch(formatApiUrl('/api/admin/delete'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({ username: adm.username })
-            })
-            .then(r => r.json())
-            .then(res => {
-              if (res.success) {
-                alert(res.message || '已成功删除该账号');
-                fetchAdminAccountsList();
-                fetchAdminListForUser();
-              } else {
-                alert('删除失败: ' + res.message);
-              }
-            });
-          }
-        });
-      }
-
-      adminAccountsList.appendChild(tr);
-    });
-  }
-
-  if (createAdminForm) {
-    createAdminForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const username = newAdminUsername ? newAdminUsername.value.trim() : '';
-      const password = newAdminPassword ? newAdminPassword.value.trim() : '';
-      if (!username || !password) return alert('请填写完整的用户名和密码');
-
-      const profile = ChatStorageManager.getProfile();
-      const token = profile ? profile.adminToken : null;
-      fetch(formatApiUrl('/api/admin/create'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ username, password })
-      })
-      .then(r => r.json())
-      .then(res => {
-        if (res.success) {
-          alert(`🎉 成功创建客服管理员账号: ${username}`);
-          newAdminUsername.value = '';
-          newAdminPassword.value = '';
-          fetchAdminAccountsList();
-          fetchAdminListForUser();
-        } else {
-          alert('创建失败: ' + res.message);
-        }
-      });
-    });
-  }
-
-  function selectAdminInternalTarget(targetUsername) {
-    adminInternalTarget = targetUsername;
-    renderAdminTeamList();
-
-    if (adminView) adminView.classList.add('mobile-show-chat');
-
-    if (targetUsername === 'ALL') {
-      adminTargetNickname.innerHTML = `📢 团队内部大厅 <span class="admin-internal-tag">内部全员</span>`;
-      adminTargetStatus.textContent = '管理员团队全员实时公共频道';
-      adminTargetAvatar.textContent = '📢';
-      adminTargetAvatar.style.background = 'linear-gradient(135deg, #8b5cf6, #ec4899)';
-    } else {
-      adminTargetNickname.innerHTML = `👥 内部私聊: ${escapeHTML(targetUsername)} <span class="admin-internal-tag">专属沟通</span>`;
-      const admObj = availableAdminsList.find(a => a.username === targetUsername);
-      const isOnline = admObj ? admObj.online : false;
-      adminTargetStatus.textContent = `管理员内部私聊 (${isOnline ? '🟢 在线' : '⚪ 离线'})`;
-      adminTargetAvatar.textContent = '👥';
-      adminTargetAvatar.style.background = 'linear-gradient(135deg, var(--primary), var(--accent-cyan))';
+      adminCustomer.renderUserList();
     }
+  });
 
-    adminTargetReasonBar.style.display = 'none';
-    btnClearTargetChat.style.display = 'none';
-
-    adminInput.disabled = false;
-    btnAdminSend.disabled = false;
-    btnAdminImage.disabled = false;
-    if (btnAdminFile) btnAdminFile.disabled = false;
-
-    renderAdminInternalChat();
-  }
-
-  function renderAdminInternalChat() {
-    if (adminActiveSidebarTab !== 'team') return;
-    adminMessagesContainer.innerHTML = '';
-
-    const filtered = allAdminInternalMessages.filter(m => {
-      if (adminInternalTarget === 'ALL') {
-        return m.receiverUsername === 'ALL';
-      } else {
-        return (m.senderUsername === adminInternalTarget && m.receiverUsername === currentAdminUsername) ||
-               (m.senderUsername === currentAdminUsername && m.receiverUsername === adminInternalTarget);
-      }
-    });
-
-    if (filtered.length === 0) {
-      adminMessagesContainer.innerHTML = `
-        <div class="empty-placeholder">
-          <div class="icon">👥</div>
-          <p>暂无内部沟通记录，主动发一条消息吧！</p>
-        </div>`;
-      return;
-    }
-
-    filtered.forEach(m => {
-      const isSelf = m.senderUsername === currentAdminUsername;
-      const msgObj = {
-        id: m.id,
-        fromNickname: isSelf ? `${m.senderUsername} (我)` : m.senderUsername,
-        text: m.text,
-        timestamp: m.timestamp,
-        senderRole: 'admin'
-      };
-      appendMessageBubble(adminMessagesContainer, msgObj, isSelf);
-    });
-
-    scrollToBottom(adminMessagesContainer);
-  }
-
-  function sendAdminImageMessage(imageDataUrl) {
-    if (!adminSelectedClientId) return;
-
-    const userObj = allAdminUsersMap.get(adminSelectedClientId);
-
-    const msgObj = {
-      id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
-      targetClientId: adminSelectedClientId,
-      targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
-      msgType: 'image',
-      reason: userObj ? userObj.reason : '',
-      text: imageDataUrl,
-      timestamp: new Date().toISOString(),
-      senderRole: 'admin'
-    };
-
-    ChatStorageManager.saveMessage(adminSelectedClientId, msgObj, 'admin');
-    renderAdminChat();
-
-    socket.emit('admin-message', msgObj);
-  }
-
-
-  const pendingFilesMap = new Map();
-
-  function uploadFileToServer(file, msgId, targetClientId) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const fileDataUrl = e.target.result;
-        try {
-          const resp = await fetch(formatApiUrl('/api/upload'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fileName: file.name,
-              fileDataUrl,
-              msgId,
-              targetClientId
-            })
-          });
-          const res = await resp.json();
-          if (res.success) {
-            resolve(res.fileUrl);
-          } else {
-            reject(new Error(res.message || '上传接口返回失败'));
-          }
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(new Error('读取本地文件失败'));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function sendUserFileRequest(file) {
-    if (!file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      return alert('单个传输文件不能超过 50MB');
-    }
-
-    const ext = (file.name || '').split('.').pop().toLowerCase();
-    const ALLOWED_EXTENSIONS = new Set([
-      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'csv',
-      'zip', 'rar', '7z', 'tar', 'gz', 'png', 'jpg', 'jpeg', 'gif', 'webp'
-    ]);
-    if (!ALLOWED_EXTENSIONS.has(ext)) {
-      return alert('安全阻断：禁止发送可执行脚本或高风险类型文件 (.' + ext + ')');
-    }
-
-    const msgId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
-
-    // Save File in memory map and IndexedDB for offline persistence
-    pendingFilesMap.set(msgId, file);
-    if (window.IDBFileStore) {
-      await IDBFileStore.saveFile(msgId, file);
-    }
-
-    const fileDataObj = {
-      msgType: 'file',
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      fileStatus: 'pending',
-      fileUrl: ''
-    };
-
-    const msgObj = {
-      id: msgId,
-      clientId: myDeviceId,
-      fromNickname: userProfile ? userProfile.nickname : '用户',
-      msgType: 'file',
-      fileData: fileDataObj,
-      text: JSON.stringify(fileDataObj),
-      timestamp: new Date().toISOString(),
-      senderRole: 'user'
-    };
-
-    ChatStorageManager.saveMessage(myDeviceId, msgObj, 'user');
-    renderUserMessages();
-
-    socket.emit('user-message', msgObj);
-  }
-
-  async function sendAdminFileDirectly(file) {
-    if (!adminSelectedClientId || !file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      return alert('单个传输文件不能超过 50MB');
-    }
-
-    const userObj = allAdminUsersMap.get(adminSelectedClientId);
-    const msgId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
-
-    const fileDataObj = {
-      msgType: 'file',
-      fileName: file.name,
-      fileSize: file.size,
-      fileType: file.type,
-      fileStatus: 'approved',
-      fileUrl: ''
-    };
-
-    const msgObj = {
-      id: msgId,
-      targetClientId: adminSelectedClientId,
-      targetNickname: userObj ? userObj.nickname : '用户',
-      fromNickname: '管理员',
-      msgType: 'file',
-      fileData: fileDataObj,
-      text: JSON.stringify(fileDataObj),
-      timestamp: new Date().toISOString(),
-      senderRole: 'admin'
-    };
-
-    ChatStorageManager.saveMessage(adminSelectedClientId, msgObj, 'admin');
-    renderAdminChat();
-
-    socket.emit('admin-message', msgObj);
-
-    try {
-      await uploadFileToServer(file, msgId, adminSelectedClientId);
-    } catch (err) {
-      alert('上传文件失败: ' + err.message);
-    }
-  }
-
-  // Socket: File Request Approval / Rejection Update
   socket.on('file-request-response', async ({ msgId, targetClientId, approved }) => {
     const chatRole = currentRole === 'admin' ? 'admin' : 'user';
     const chatId = currentRole === 'admin' ? targetClientId : myDeviceId;
 
-    const messages = ChatStorageManager.getMessages(chatId, chatRole);
+    const messages = window.ChatStorageManager.getMessages(chatId, chatRole);
     const targetMsg = messages.find(m => m.id === msgId);
     if (targetMsg) {
-      let parsed = parseFileMsg(targetMsg) || {};
+      let parsed = userChat.parseFileMsg(targetMsg) || {};
       parsed.fileStatus = approved ? 'approved' : 'rejected';
       targetMsg.text = JSON.stringify(parsed);
       targetMsg.fileData = parsed;
 
-      const key = ChatStorageManager.getChatKey(chatId, chatRole);
+      const key = window.ChatStorageManager.getChatKey(chatId, chatRole);
       localStorage.setItem(key, JSON.stringify(messages));
     }
 
     if (currentRole === 'user') {
-      renderUserMessages();
-      if (approved && pendingFilesMap.has(msgId)) {
-        const file = pendingFilesMap.get(msgId);
+      userChat.renderMessages();
+      if (approved && userChat.pendingFilesMap.has(msgId)) {
+        const file = userChat.pendingFilesMap.get(msgId);
         try {
-          await uploadFileToServer(file, msgId, myDeviceId);
-          pendingFilesMap.delete(msgId);
+          await adminCustomer.uploadFileToServer(file, msgId, myDeviceId);
+          userChat.pendingFilesMap.delete(msgId);
         } catch (err) {
           alert('上传文件失败: ' + err.message);
         }
       }
-    } else if (currentRole === 'admin' && adminSelectedClientId === targetClientId) {
-      renderAdminChat();
+    } else if (currentRole === 'admin' && adminCustomer.adminSelectedClientId === targetClientId) {
+      adminCustomer.renderChat();
     }
   });
 
-  // Socket: File Upload Completed Update
   socket.on('file-upload-finished', ({ msgId, targetClientId, fileUrl, fileData }) => {
     const chatRole = currentRole === 'admin' ? 'admin' : 'user';
     const chatId = currentRole === 'admin' ? targetClientId : myDeviceId;
 
-    const messages = ChatStorageManager.getMessages(chatId, chatRole);
+    const messages = window.ChatStorageManager.getMessages(chatId, chatRole);
     const targetMsg = messages.find(m => m.id === msgId);
     if (targetMsg) {
-      let parsed = parseFileMsg(targetMsg) || {};
+      let parsed = userChat.parseFileMsg(targetMsg) || {};
       parsed.fileStatus = 'completed';
       parsed.fileUrl = fileUrl;
       targetMsg.text = JSON.stringify(parsed);
       targetMsg.fileData = parsed;
 
-      const key = ChatStorageManager.getChatKey(chatId, chatRole);
+      const key = window.ChatStorageManager.getChatKey(chatId, chatRole);
       localStorage.setItem(key, JSON.stringify(messages));
     }
 
     if (currentRole === 'user') {
-      renderUserMessages();
-    } else if (currentRole === 'admin' && adminSelectedClientId === targetClientId) {
-      renderAdminChat();
+      userChat.renderMessages();
+    } else if (currentRole === 'admin' && adminCustomer.adminSelectedClientId === targetClientId) {
+      adminCustomer.renderChat();
     }
   });
 
   socket.on('update-user-list', (userList) => {
     if (currentRole === 'admin') {
-      updateAdminUsersMap(userList);
-      renderAdminUserList();
+      adminCustomer.updateAdminUsersMap(userList);
+      adminCustomer.renderUserList();
 
-      if (adminSelectedClientId) {
-        const u = allAdminUsersMap.get(adminSelectedClientId);
+      if (adminCustomer.adminSelectedClientId) {
+        const u = adminCustomer.allAdminUsersMap.get(adminCustomer.adminSelectedClientId);
         if (u) {
-          adminTargetNickname.innerHTML = `${escapeHTML(u.nickname)} <span style="font-size:11px; font-weight:normal; color:var(--text-dim);">(${escapeHTML(u.clientId)})</span>`;
-          adminTargetStatus.innerHTML = u.online 
+          adminCustomer.adminTargetNickname.innerHTML = `${adminCustomer.escapeHTML(u.nickname)} <span style="font-size:11px; font-weight:normal; color:var(--text-dim);">(${adminCustomer.escapeHTML(u.clientId)})</span>`;
+          adminCustomer.adminTargetStatus.innerHTML = u.online 
             ? `<span class="status-dot online"></span> 状态：在线`
-            : `<span class="status-dot"></span> 状态：离线 ${u.lastSeen ? '(上次在线: ' + formatTime(u.lastSeen) + ')' : ''}`;
+            : `<span class="status-dot"></span> 状态：离线 ${u.lastSeen ? '(上次在线: ' + adminCustomer.formatTime(u.lastSeen) + ')' : ''}`;
 
-          const nicks = (u.nicknameHistory || []).map(n => escapeHTML(n.nickname));
-          const ips = (u.ipHistory || []).map(i => `${escapeHTML(i.ip_address)} (${formatTime(i.logged_in_at)})`);
+          const nicks = (u.nicknameHistory || []).map(n => adminCustomer.escapeHTML(n.nickname));
+          const ips = (u.ipHistory || []).map(i => `${adminCustomer.escapeHTML(i.ip_address)} (${adminCustomer.formatTime(i.logged_in_at)})`);
 
-          historyNicknamesText.innerHTML = nicks.length > 0 ? nicks.join(' <span style="color:var(--text-dim);">➔</span> ') : escapeHTML(u.nickname);
-          historyIpsText.innerHTML = ips.length > 0 ? ips.join(' | ') : escapeHTML(u.lastIp || '127.0.0.1');
+          adminCustomer.historyNicknamesText.innerHTML = nicks.length > 0 ? nicks.join(' <span style="color:var(--text-dim);">➔</span> ') : adminCustomer.escapeHTML(u.nickname);
+          adminCustomer.historyIpsText.innerHTML = ips.length > 0 ? ips.join(' | ') : adminCustomer.escapeHTML(u.lastIp || '127.0.0.1');
         }
       }
     }
@@ -1958,13 +651,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (currentRole === 'admin') {
       const clientId = msgObj.clientId;
 
-      if (allAdminUsersMap.has(clientId)) {
-        const u = allAdminUsersMap.get(clientId);
+      if (adminCustomer.allAdminUsersMap.has(clientId)) {
+        const u = adminCustomer.allAdminUsersMap.get(clientId);
         u.nickname = msgObj.fromNickname || u.nickname;
         u.reason = msgObj.reason || u.reason;
         u.online = true;
       } else {
-        allAdminUsersMap.set(clientId, {
+        adminCustomer.allAdminUsersMap.set(clientId, {
           clientId: clientId,
           nickname: msgObj.fromNickname,
           reason: msgObj.reason,
@@ -1972,24 +665,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
 
-      ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
+      window.ChatStorageManager.saveMessage(clientId, msgObj, 'admin');
 
-      if (adminActiveSidebarTab === 'customers' && adminSelectedClientId === clientId) {
-        renderAdminChat();
+      if (adminActiveSidebarTab === 'customers' && adminCustomer.adminSelectedClientId === clientId) {
+        adminCustomer.renderChat();
       } else {
-        ChatStorageManager.incrementUnreadCount(clientId);
+        window.ChatStorageManager.incrementUnreadCount(clientId);
         if (adminActiveSidebarTab !== 'customers') {
-          customersUnreadCount++;
+          adminCustomer.customersUnreadCount++;
           if (customersUnreadBadge) {
-            customersUnreadBadge.textContent = customersUnreadCount;
+            customersUnreadBadge.textContent = adminCustomer.customersUnreadCount;
             customersUnreadBadge.classList.remove('hidden');
           }
         }
       }
 
-      renderAdminUserList();
+      adminCustomer.renderUserList();
 
-      const fileData = parseFileMsg(msgObj);
+      const fileData = userChat.parseFileMsg(msgObj);
       let notifBody = '';
       if (fileData) {
         notifBody = `求助原因: ${msgObj.reason || '无'}\n[请求传输文件: ${fileData.fileName}]`;
@@ -2003,422 +696,16 @@ document.addEventListener('DOMContentLoaded', () => {
         body: notifBody,
         tag: `user-msg-${clientId}`
       }, () => {
-        selectUserForAdmin(clientId);
+        adminCustomer.selectUserForAdmin(clientId);
       });
     }
   });
 
   socket.on('user-typing', ({ clientId, nickname, isTyping }) => {
-    if (currentRole === 'admin' && adminActiveSidebarTab === 'customers' && adminSelectedClientId === clientId) {
-      adminTypingStatus.style.display = isTyping ? 'block' : 'none';
+    if (currentRole === 'admin' && adminActiveSidebarTab === 'customers' && adminCustomer.adminSelectedClientId === clientId) {
+      if (adminCustomer.adminTypingStatus) {
+        adminCustomer.adminTypingStatus.style.display = isTyping ? 'block' : 'none';
+      }
     }
   });
-
-  // =========================================================================
-  // Common Utilities & Message Rendering
-  // =========================================================================
-  
-  function formatFileSize(bytes) {
-    if (!bytes || isNaN(bytes)) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  }
-
-  function getFileIcon(fileName) {
-    const ext = (fileName || '').split('.').pop().toLowerCase();
-    if (['pdf'].includes(ext)) return '📄';
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '📦';
-    if (['doc', 'docx', 'txt', 'md'].includes(ext)) return '📝';
-    if (['xls', 'xlsx', 'csv'].includes(ext)) return '📊';
-    if (['ppt', 'pptx'].includes(ext)) return '📊';
-    if (['mp3', 'wav', 'ogg'].includes(ext)) return '🎵';
-    if (['mp4', 'avi', 'mkv', 'mov'].includes(ext)) return '🎬';
-    if (['exe', 'msi', 'apk', 'dmg'].includes(ext)) return '⚙️';
-    return '📁';
-  }
-
-  function parseFileMsg(msg) {
-    if (msg.msgType === 'file' && typeof msg.fileData === 'object' && msg.fileData) {
-      return msg.fileData;
-    }
-    if (typeof msg.text === 'string' && msg.text.trim().startsWith('{')) {
-      try {
-        const parsed = JSON.parse(msg.text);
-        if (parsed && parsed.msgType === 'file') {
-          return parsed;
-        }
-      } catch (e) {}
-    }
-    return null;
-  }
-
-  function notifyTyping() {
-    if (!currentRole) return;
-    if (currentRole === 'admin' && adminActiveSidebarTab !== 'customers') return;
-
-    socket.emit('typing', {
-      isTyping: true,
-      targetClientId: currentRole === 'admin' ? adminSelectedClientId : null
-    });
-
-    clearTimeout(typingTimer);
-    typingTimer = setTimeout(() => {
-      socket.emit('typing', {
-        isTyping: false,
-        targetClientId: currentRole === 'admin' ? adminSelectedClientId : null
-      });
-    }, 1500);
-  }
-
-  function appendMessageBubble(container, msg, isSentByMe) {
-    const timeStr = formatTime(msg.timestamp);
-
-    const bubbleWrapper = document.createElement('div');
-    bubbleWrapper.className = `message-bubble-wrapper ${isSentByMe ? 'sent' : 'received'}`;
-    
-    const fileData = parseFileMsg(msg);
-    const isImage = !fileData && (msg.msgType === 'image' || (msg.text && typeof msg.text === 'string' && msg.text.startsWith('data:image/')));
-
-    let contentHtml = '';
-    if (fileData) {
-      const icon = getFileIcon(fileData.fileName);
-      const sizeStr = formatFileSize(fileData.fileSize);
-      const status = fileData.fileStatus || 'pending';
-
-      let statusBadgeHtml = '';
-      let actionsHtml = '';
-
-      if (status === 'pending') {
-        statusBadgeHtml = `<span class="file-status-badge pending">⏳ 待管理员审核</span>`;
-        if (currentRole === 'admin') {
-          actionsHtml = `
-            <div class="file-card-actions">
-              <button type="button" class="btn-file-action btn-file-approve">✅ 同意接收</button>
-              <button type="button" class="btn-file-action btn-file-reject">❌ 拒绝</button>
-            </div>
-          `;
-        } else {
-          actionsHtml = `<div style="font-size:12px; color:var(--text-dim); margin-top:4px;">需管理员审核同意后方可开始传输</div>`;
-        }
-      } else if (status === 'approved') {
-        statusBadgeHtml = `<span class="file-status-badge approved">✅ 已同意，传输保存中...</span>`;
-      } else if (status === 'rejected') {
-        statusBadgeHtml = `<span class="file-status-badge rejected">❌ 管理员已拒绝传输</span>`;
-      } else if (status === 'completed') {
-        statusBadgeHtml = `<span class="file-status-badge approved">✅ 传输完成</span>`;
-        actionsHtml = `
-          <div style="margin-top: 6px;">
-            <a class="btn-file-download" href="${formatApiUrl(fileData.fileUrl)}" download="${escapeHTML(fileData.fileName)}" target="_blank">📥 下载文件 (${sizeStr})</a>
-          </div>
-        `;
-      }
-
-      contentHtml = `
-        <div class="file-card">
-          <div class="file-card-header">
-            <span class="file-card-icon">${icon}</span>
-            <div class="file-card-info">
-              <div class="file-card-name" title="${escapeHTML(fileData.fileName)}">${escapeHTML(fileData.fileName)}</div>
-              <div class="file-card-size">${sizeStr}</div>
-            </div>
-          </div>
-          ${statusBadgeHtml}
-          ${actionsHtml}
-        </div>
-      `;
-    } else if (isImage) {
-      contentHtml = `<img class="chat-image-preview" src="${msg.text}" alt="图片消息" title="点击查看大图">`;
-    } else {
-      contentHtml = escapeHTML(msg.text);
-    }
-
-    bubbleWrapper.innerHTML = `
-      <div class="message-meta">
-        <span>${escapeHTML(isSentByMe ? '我' : (msg.fromNickname || '管理员'))}</span>
-        <span>•</span>
-        <span>${timeStr}</span>
-      </div>
-      <div class="message-bubble">${contentHtml}</div>
-    `;
-
-    // Click image to open Lightbox
-    if (isImage) {
-      const imgEl = bubbleWrapper.querySelector('.chat-image-preview');
-      if (imgEl) {
-        imgEl.addEventListener('click', () => {
-          openImageLightbox(msg.text);
-        });
-      }
-    }
-
-    // Admin File Approve / Reject Click Handlers
-    if (fileData && fileData.fileStatus === 'pending' && currentRole === 'admin') {
-      const btnApprove = bubbleWrapper.querySelector('.btn-file-approve');
-      const btnReject = bubbleWrapper.querySelector('.btn-file-reject');
-
-      if (btnApprove) {
-        btnApprove.addEventListener('click', () => {
-          socket.emit('admin-file-response', {
-            msgId: msg.id,
-            targetClientId: msg.clientId || msg.targetClientId,
-            approved: true
-          }, (res) => {
-            if (res && !res.success) alert(res.message || '操作失败');
-          });
-        });
-      }
-
-      if (btnReject) {
-        btnReject.addEventListener('click', () => {
-          socket.emit('admin-file-response', {
-            msgId: msg.id,
-            targetClientId: msg.clientId || msg.targetClientId,
-            approved: false
-          }, (res) => {
-            if (res && !res.success) alert(res.message || '操作失败');
-          });
-        });
-      }
-    }
-
-    container.appendChild(bubbleWrapper);
-  }
-
-  function scrollToBottom(container) {
-    container.scrollTop = container.scrollHeight;
-  }
-
-  function formatTime(isoString) {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    return `${hours}:${minutes}`;
-  }
-
-  function escapeHTML(str) {
-    return String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-// =========================================================================
-  // Right-Click Context Menu Logic
-  // =========================================================================
-  function hideContextMenu() {
-    if (adminContextMenu) adminContextMenu.classList.add('hidden');
-    activeContextClientId = null;
-  }
-
-  function showContextMenu(e, clientId) {
-    e.preventDefault();
-    if (!adminContextMenu) return;
-
-    activeContextClientId = clientId;
-    adminContextMenu.classList.remove('hidden');
-
-    const menuWidth = 190;
-    const menuHeight = 90;
-    let posX = e.clientX;
-    let posY = e.clientY;
-
-    if (posX + menuWidth > window.innerWidth) {
-      posX = window.innerWidth - menuWidth - 10;
-    }
-    if (posY + menuHeight > window.innerHeight) {
-      posY = window.innerHeight - menuHeight - 10;
-    }
-
-    adminContextMenu.style.left = posX + 'px';
-    adminContextMenu.style.top = posY + 'px';
-  }
-
-  document.addEventListener('click', (e) => {
-    if (adminContextMenu && !adminContextMenu.contains(e.target)) {
-      hideContextMenu();
-    }
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      hideContextMenu();
-    }
-  });
-
-  if (ctxItemClear) {
-    ctxItemClear.addEventListener('click', () => {
-      if (activeContextClientId) {
-        const cId = activeContextClientId;
-        hideContextMenu();
-        if (confirm(`确定要彻底清空与设备 (${cId}) 的本地与服务端聊天记录吗？`)) {
-          ChatStorageManager.clearMessages(cId, 'admin');
-          socket.emit('admin-clear-messages', { targetClientId: cId });
-          if (adminSelectedClientId === cId) {
-            renderAdminChat();
-          }
-        }
-      }
-    });
-  }
-
-  if (ctxItemDelete) {
-    ctxItemDelete.addEventListener('click', () => {
-      if (activeContextClientId) {
-        const cId = activeContextClientId;
-        hideContextMenu();
-        if (confirm(`确定要彻底删除设备 (${cId}) 的会话记录及服务端所有历史记录吗？`)) {
-          socket.emit('admin-delete-session', { targetClientId: cId });
-          allAdminUsersMap.delete(cId);
-          ChatStorageManager.clearMessages(cId, 'admin');
-          ChatStorageManager.clearUnreadCount(cId);
-
-          if (adminSelectedClientId === cId) {
-            adminSelectedClientId = null;
-            adminTargetNickname.textContent = '请选择左侧用户';
-            adminTargetStatus.textContent = '选择用户后查看其提问记录';
-            adminTargetAvatar.textContent = '?';
-            adminTargetReasonBar.style.display = 'none';
-            btnClearTargetChat.style.display = 'none';
-            adminMessagesContainer.innerHTML = `<div class="empty-placeholder"><div class="icon">👈</div><p>请在左侧侧边栏选择一个用户开始对话</p></div>`;
-            adminInput.disabled = true;
-            btnAdminSend.disabled = true;
-            btnAdminImage.disabled = true;
-            if (btnAdminFile) btnAdminFile.disabled = true;
-          }
-
-          renderAdminUserList();
-        }
-      }
-    });
-  }
-
-  // =========================================================================
-  // Super Admin Sub-Admin Management Logic
-  // =========================================================================
-  async function fetchAndRenderAdminAccounts() {
-    const profile = ChatStorageManager.getProfile();
-    const token = profile ? profile.adminToken : '';
-    try {
-      const resp = await fetch(formatApiUrl('/api/admin/list'), {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await resp.json();
-      if (data.success) {
-        renderAdminAccountsTable(data.admins || []);
-      } else {
-        alert(data.message || '获取管理员列表失败');
-      }
-    } catch (err) {
-      alert('加载管理员列表失败: ' + err.message);
-    }
-  }
-
-  function renderAdminAccountsTable(admins) {
-    if (!adminAccountsList) return;
-    adminAccountsList.innerHTML = '';
-    if (admins.length === 0) {
-      adminAccountsList.innerHTML = `<tr><td colspan="4" style="padding: 12px; text-align: center; color: var(--text-dim);">暂无管理员账号</td></tr>`;
-      return;
-    }
-
-    admins.forEach(adm => {
-      const tr = document.createElement('tr');
-      tr.className = 'admin-table-row';
-      const isSuper = adm.role === 'super_admin';
-      const dateStr = adm.created_at ? formatTime(adm.created_at) : '-';
-      tr.innerHTML = `
-        <td style="padding: 10px 12px; font-weight: 600;">${escapeHTML(adm.username)}</td>
-        <td style="padding: 10px 12px;"><span class="admin-badge ${isSuper ? 'super' : ''}">${isSuper ? '主管理' : '普通客服'}</span></td>
-        <td style="padding: 10px 12px; color: var(--text-dim); font-size: 12px;">${dateStr}</td>
-        <td style="padding: 10px 12px; text-align: right;">
-          ${isSuper ? '<span style="font-size:11px; color:var(--text-dim);">不可删除</span>' : `<button type="button" class="btn-icon btn-danger btn-delete-adm" data-user="${escapeHTML(adm.username)}" style="padding: 3px 8px; font-size: 11px;">🗑️ 删除</button>`}
-        </td>
-      `;
-      adminAccountsList.appendChild(tr);
-    });
-
-    adminAccountsList.querySelectorAll('.btn-delete-adm').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const targetUser = btn.dataset.user;
-        if (confirm(`确定要注销并删除管理员账号 (${targetUser}) 吗？`)) {
-          await deleteAdminAccount(targetUser);
-        }
-      });
-    });
-  }
-
-  async function deleteAdminAccount(username) {
-    const profile = ChatStorageManager.getProfile();
-    const token = profile ? profile.adminToken : '';
-    try {
-      const resp = await fetch(formatApiUrl('/api/admin/delete'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ username })
-      });
-      const data = await resp.json();
-      if (data.success) {
-        fetchAndRenderAdminAccounts();
-      } else {
-        alert(data.message || '删除管理员失败');
-      }
-    } catch (err) {
-      alert('操作失败: ' + err.message);
-    }
-  }
-
-  if (btnAdminManageUsers) {
-    btnAdminManageUsers.addEventListener('click', () => {
-      if (adminManagementModal) {
-        adminManagementModal.classList.remove('hidden');
-        fetchAndRenderAdminAccounts();
-      }
-    });
-  }
-
-  if (btnCloseAdminModal) {
-    btnCloseAdminModal.addEventListener('click', () => {
-      if (adminManagementModal) adminManagementModal.classList.add('hidden');
-    });
-  }
-
-  if (createAdminForm) {
-    createAdminForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const username = newAdminUsername ? newAdminUsername.value.trim() : '';
-      const password = newAdminPassword ? newAdminPassword.value.trim() : '';
-      if (!username || !password) return alert('用户名与密码均不能为空');
-
-      const profile = ChatStorageManager.getProfile();
-      const token = profile ? profile.adminToken : '';
-      try {
-        const resp = await fetch(formatApiUrl('/api/admin/create'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ username, password })
-        });
-        const data = await resp.json();
-        if (data.success) {
-          if (newAdminUsername) newAdminUsername.value = '';
-          if (newAdminPassword) newAdminPassword.value = '';
-          fetchAndRenderAdminAccounts();
-        } else {
-          alert(data.message || '创建管理员账号失败');
-        }
-      } catch (err) {
-        alert('创建失败: ' + err.message);
-      }
-    });
-  }
 });
