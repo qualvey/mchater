@@ -1,5 +1,5 @@
 {
-  "hostanme": "127.0.0.1",
+  "hostname": "127.0.0.1",
   "port": 4000,
   "adminUsername": "admin",
   "adminKey": "admin123",
