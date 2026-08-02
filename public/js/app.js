@@ -493,8 +493,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (adminUserSearch) adminUserSearch.placeholder = '搜索用户昵称/ID/原因...';
         adminCustomer.customersUnreadCount = 0;
         if (customersUnreadBadge) customersUnreadBadge.classList.add('hidden');
+
+        if (adminView) adminView.classList.remove('mobile-show-chat');
+
         if (adminCustomer.adminSelectedClientId) {
-          adminCustomer.selectUserForAdmin(adminCustomer.adminSelectedClientId);
+          adminCustomer.selectUserForAdmin(adminCustomer.adminSelectedClientId, false);
         }
       });
     }
@@ -513,7 +516,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         adminTeam.fetchAdminList();
         adminTeam.renderTeamList();
-        adminTeam.selectAdminInternalTarget(adminTeam.adminInternalTarget);
+
+        if (adminView) adminView.classList.remove('mobile-show-chat');
+
+        adminTeam.selectAdminInternalTarget(adminTeam.adminInternalTarget, false);
       });
     }
 
@@ -526,7 +532,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return (b.online ? 1 : 0) - (a.online ? 1 : 0);
       });
       if (usersList.length > 0) {
-        adminCustomer.selectUserForAdmin(usersList[0].clientId);
+        adminCustomer.selectUserForAdmin(usersList[0].clientId, false);
       }
     }
   }

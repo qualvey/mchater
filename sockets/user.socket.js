@@ -4,6 +4,7 @@
  */
 const ChatDatabase = require('../db');
 const Logger = require('../logger');
+const AutoReplyService = require('../services/autoReply.service');
 
 function registerUserSocketHandlers(io, socket, context) {
   const {
@@ -108,6 +109,18 @@ function registerUserSocketHandlers(io, socket, context) {
     socket.userRole = 'user';
 
     const historyMessages = ChatDatabase.getMessages(cleanClientId);
+    const isNewUser = (!historyMessages || historyMessages.length === 0);
+
+    const autoReplyMsg = AutoReplyService.triggerOfflineReplyIfNeeded({
+      clientId: cleanClientId,
+      historyMessages: historyMessages,
+      isNewUser: isNewUser,
+      isAnyAdminOnline: isAnyAdminOnline()
+    });
+
+    if (autoReplyMsg) {
+      historyMessages.push(autoReplyMsg);
+    }
 
     callback({
       success: true,

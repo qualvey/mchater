@@ -178,6 +178,7 @@
             <span class="admin-badge" id="admin-role-badge">管理员</span>
           </h3>
           <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn-icon" id="btn-admin-settings" title="系统参数与离线回复设置" style="padding: 4px 8px; font-size: 11px;">⚙️ 设置</button>
             <button class="btn-icon" id="btn-admin-change-password" title="修改我的密码" style="padding: 4px 8px; font-size: 11px;">🔑 密码</button>
             <button class="btn-icon" id="btn-admin-manage-users" title="管理员账号管理 (主管理特权)" style="display:none; padding: 4px 8px; font-size: 11px;">👥 账号</button>
             <button class="btn-icon btn-danger btn-icon-only" id="btn-admin-logout" title="退出管理员账号">🚪</button>
@@ -379,6 +380,59 @@
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;">
           <button type="button" id="btn-cancel-pwd" class="btn-icon" style="padding: 6px 14px; font-size: 13px;">取消</button>
           <button type="submit" class="btn-submit" style="width: auto; padding: 6px 16px; font-size: 13px;">确认修改</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Admin System Settings Modal Overlay -->
+  <div id="admin-settings-modal" class="modal-overlay hidden" style="z-index: 154;">
+    <div class="login-card" style="max-width: 480px; padding: 24px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); padding-bottom: 10px;">
+        <h3 style="display: flex; align-items: center; gap: 8px; font-size: 16px; color: var(--text-main);">
+          <span>⚙️ 系统设置控制台</span>
+        </h3>
+        <button id="btn-close-settings-modal" class="btn-icon" style="padding: 4px 10px;">✕</button>
+      </div>
+
+      <form id="settings-form" style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="background: rgba(15, 23, 42, 0.4); padding: 14px; border-radius: var(--radius-md); border: 1px solid var(--glass-border);">
+          <h4 style="font-size: 14px; margin-bottom: 12px; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+            <span>🤖 离线自动回复设置</span>
+          </h4>
+
+          <div class="form-group" style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between;">
+            <label for="setting-auto-reply-enabled" style="font-size: 13px; color: var(--text-main); margin-bottom: 0; cursor: pointer;">
+              开启无客服在线时自动回复
+            </label>
+            <input type="checkbox" id="setting-auto-reply-enabled" style="width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 14px;">
+            <label for="setting-auto-reply-mode" style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; display: block;">回复触发模式</label>
+            <select id="setting-auto-reply-mode" style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px;">
+              <option value="first_and_followup">区分首次与再次进线回复 (推荐)</option>
+              <option value="always_same">总是回复同一提示词 (不限进线次数)</option>
+              <option value="first_only">仅首次进线回复 (老用户不发送)</option>
+            </select>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 14px;" id="container-first-message">
+            <label for="setting-auto-reply-first-message" style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; display: block;" id="label-first-message">首次进线自动回复内容</label>
+            <textarea id="setting-auto-reply-first-message" rows="3" placeholder="例如：您好！欢迎首次咨询，当前暂无客服在线，您可以先在此留言..." style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px; resize: vertical;" required></textarea>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;" id="container-followup-message">
+            <label for="setting-auto-reply-followup-message" style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; display: block;">再次进线自动回复内容 (老用户重新进线)</label>
+            <textarea id="setting-auto-reply-followup-message" rows="3" placeholder="例如：您好，欢迎再次回来！客服目前暂时不在电脑前，已为您记录留言..." style="width: 100%; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--glass-border); padding: 8px 12px; border-radius: var(--radius-sm); color: var(--text-main); font-size: 13px; resize: vertical;"></textarea>
+          </div>
+        </div>
+
+        <div id="settings-msg" style="display: none; font-size: 12px; padding: 6px 10px; border-radius: 4px;"></div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" id="btn-cancel-settings" class="btn-icon" style="padding: 6px 14px; font-size: 13px;">取消</button>
+          <button type="submit" class="btn-submit" style="width: auto; padding: 6px 16px; font-size: 13px;">保存设置</button>
         </div>
       </form>
     </div>

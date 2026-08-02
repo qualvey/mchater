@@ -1,10 +1,14 @@
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
 const dbPath = path.join(__dirname, 'chat.db');
-const db = new Database(dbPath);
+const db = new DatabaseSync(dbPath);
+
+db.pragma = function (sql) {
+  return db.exec(`PRAGMA ${sql}`);
+};
 
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
@@ -75,7 +79,35 @@ db.exec(`
     text TEXT NOT NULL,
     timestamp TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS system_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
+
+// Initialize default system configs if not present
+try {
+  const initEnabled = db.prepare("SELECT value FROM system_configs WHERE key = 'auto_reply_enabled'").get();
+  if (!initEnabled) {
+    db.prepare("INSERT INTO system_configs (key, value, updated_at) VALUES (?, ?, ?)").run('auto_reply_enabled', 'true', new Date().toISOString());
+  }
+  const initMode = db.prepare("SELECT value FROM system_configs WHERE key = 'auto_reply_mode'").get();
+  if (!initMode) {
+    db.prepare("INSERT INTO system_configs (key, value, updated_at) VALUES (?, ?, ?)").run('auto_reply_mode', 'first_and_followup', new Date().toISOString());
+  }
+  const initFirstMsg = db.prepare("SELECT value FROM system_configs WHERE key = 'auto_reply_first_message'").get();
+  if (!initFirstMsg) {
+    db.prepare("INSERT INTO system_configs (key, value, updated_at) VALUES (?, ?, ?)").run('auto_reply_first_message', '您好！欢迎首次咨询，当前暂无客服在线，您可以先在此留言描述您的问题，客服上线后会第一时间回复您！', new Date().toISOString());
+  }
+  const initFollowupMsg = db.prepare("SELECT value FROM system_configs WHERE key = 'auto_reply_followup_message'").get();
+  if (!initFollowupMsg) {
+    db.prepare("INSERT INTO system_configs (key, value, updated_at) VALUES (?, ?, ?)").run('auto_reply_followup_message', '您好，欢迎再次回来！客服目前暂时不在电脑前，已为您记录留言，请耐心等待回复！', new Date().toISOString());
+  }
+} catch (e) {
+  console.error("[DB INIT] System configs init error:", e);
+}
 
 // Migration: Ensure display_name column exists in admins table
 try {
@@ -426,6 +458,63 @@ class ChatDatabase {
       text: m.text,
       timestamp: m.timestamp
     }));
+  }
+
+  // System Config & Auto Reply Settings
+  static getSystemConfig(key, defaultValue = '') {
+    try {
+      const record = db.prepare('SELECT value FROM system_configs WHERE key = ?').get(key);
+      return record ? record.value : defaultValue;
+    } catch (e) {
+      return defaultValue;
+    }
+  }
+
+  static setSystemConfig(key, value) {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO system_configs (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(key, String(value), now);
+  }
+
+  static getAutoReplyConfig() {
+    const enabledStr = ChatDatabase.getSystemConfig('auto_reply_enabled', 'true');
+    const mode = ChatDatabase.getSystemConfig('auto_reply_mode', 'first_and_followup');
+    const firstMessage = ChatDatabase.getSystemConfig(
+      'auto_reply_first_message',
+      ChatDatabase.getSystemConfig('auto_reply_message', '您好！欢迎首次咨询，当前暂无客服在线，您可以先在此留言描述您的问题，客服上线后会第一时间回复您！')
+    );
+    const followupMessage = ChatDatabase.getSystemConfig(
+      'auto_reply_followup_message',
+      '您好，欢迎再次回来！客服目前暂时不在电脑前，已为您记录留言，请耐心等待回复！'
+    );
+    return {
+      enabled: enabledStr === 'true',
+      mode: mode, // 'first_only' | 'always_same' | 'first_and_followup'
+      firstMessage: firstMessage,
+      followupMessage: followupMessage,
+      message: firstMessage
+    };
+  }
+
+  static updateAutoReplyConfig({ enabled, mode, firstMessage, followupMessage, message }) {
+    if (typeof enabled === 'boolean') {
+      ChatDatabase.setSystemConfig('auto_reply_enabled', enabled ? 'true' : 'false');
+    }
+    if (typeof mode === 'string' && ['first_only', 'always_same', 'first_and_followup'].includes(mode)) {
+      ChatDatabase.setSystemConfig('auto_reply_mode', mode);
+    }
+    const cleanFirst = typeof firstMessage === 'string' ? firstMessage.trim() : (typeof message === 'string' ? message.trim() : null);
+    if (cleanFirst !== null && cleanFirst !== '') {
+      ChatDatabase.setSystemConfig('auto_reply_first_message', cleanFirst);
+      ChatDatabase.setSystemConfig('auto_reply_message', cleanFirst);
+    }
+    if (typeof followupMessage === 'string' && followupMessage.trim() !== '') {
+      ChatDatabase.setSystemConfig('auto_reply_followup_message', followupMessage.trim());
+    }
+    return ChatDatabase.getAutoReplyConfig();
   }
 }
 

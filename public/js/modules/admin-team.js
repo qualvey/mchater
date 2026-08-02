@@ -54,10 +54,53 @@ export class AdminTeamModule {
     this.inputConfirmPassword = document.getElementById('input-confirm-password');
     this.changePwdMsg = document.getElementById('change-pwd-msg');
 
+    // Settings DOM Elements
+    this.btnAdminSettings = document.getElementById('btn-admin-settings');
+    this.adminSettingsModal = document.getElementById('admin-settings-modal');
+    this.btnCloseSettingsModal = document.getElementById('btn-close-settings-modal');
+    this.btnCancelSettings = document.getElementById('btn-cancel-settings');
+    this.settingsForm = document.getElementById('settings-form');
+    this.settingAutoReplyEnabled = document.getElementById('setting-auto-reply-enabled');
+    this.settingAutoReplyMode = document.getElementById('setting-auto-reply-mode');
+    this.settingAutoReplyFirstMessage = document.getElementById('setting-auto-reply-first-message');
+    this.settingAutoReplyFollowupMessage = document.getElementById('setting-auto-reply-followup-message');
+    this.containerFollowupMessage = document.getElementById('container-followup-message');
+    this.labelFirstMessage = document.getElementById('label-first-message');
+    this.settingsMsg = document.getElementById('settings-msg');
+
     this.bindEvents();
   }
 
   bindEvents() {
+    if (this.settingAutoReplyMode) {
+      this.settingAutoReplyMode.addEventListener('change', () => {
+        this.updateSettingsModeUI();
+      });
+    }
+    if (this.btnAdminSettings) {
+      this.btnAdminSettings.addEventListener('click', () => {
+        this.openSettingsModal();
+      });
+    }
+
+    if (this.btnCloseSettingsModal) {
+      this.btnCloseSettingsModal.addEventListener('click', () => {
+        if (this.adminSettingsModal) this.adminSettingsModal.classList.add('hidden');
+      });
+    }
+
+    if (this.btnCancelSettings) {
+      this.btnCancelSettings.addEventListener('click', () => {
+        if (this.adminSettingsModal) this.adminSettingsModal.classList.add('hidden');
+      });
+    }
+
+    if (this.settingsForm) {
+      this.settingsForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.saveSettings();
+      });
+    }
     if (this.btnAdminManageUsers) {
       this.btnAdminManageUsers.addEventListener('click', () => {
         if (this.adminManagementModal) {
@@ -90,18 +133,18 @@ export class AdminTeamModule {
           },
           body: JSON.stringify({ username, password })
         })
-        .then(r => r.json())
-        .then(res => {
-          if (res.success) {
-            alert(`🎉 成功创建客服管理员账号: ${username}`);
-            if (this.newAdminUsername) this.newAdminUsername.value = '';
-            if (this.newAdminPassword) this.newAdminPassword.value = '';
-            this.fetchAdminAccountsList();
-            this.fetchAdminList();
-          } else {
-            alert('创建失败: ' + res.message);
-          }
-        });
+          .then(r => r.json())
+          .then(res => {
+            if (res.success) {
+              alert(`🎉 成功创建客服管理员账号: ${username}`);
+              if (this.newAdminUsername) this.newAdminUsername.value = '';
+              if (this.newAdminPassword) this.newAdminPassword.value = '';
+              this.fetchAdminAccountsList();
+              this.fetchAdminList();
+            } else {
+              alert('创建失败: ' + res.message);
+            }
+          });
       });
     }
 
@@ -166,20 +209,20 @@ export class AdminTeamModule {
           },
           body: JSON.stringify({ oldPassword, newPassword })
         })
-        .then(r => r.json())
-        .then(res => {
-          if (res.success) {
-            showMsg('🎉 密码修改成功！下次登录请使用新密码。', true);
-            setTimeout(() => {
-              closePwdModal();
-            }, 1600);
-          } else {
-            showMsg('修改失败: ' + res.message);
-          }
-        })
-        .catch(err => {
-          showMsg('网络请求异常: ' + err.message);
-        });
+          .then(r => r.json())
+          .then(res => {
+            if (res.success) {
+              showMsg('🎉 密码修改成功！下次登录请使用新密码。', true);
+              setTimeout(() => {
+                closePwdModal();
+              }, 1600);
+            } else {
+              showMsg('修改失败: ' + res.message);
+            }
+          })
+          .catch(err => {
+            showMsg('网络请求异常: ' + err.message);
+          });
       });
     }
   }
@@ -239,7 +282,7 @@ export class AdminTeamModule {
       </div>
     `;
     hallDiv.addEventListener('click', () => this.selectAdminInternalTarget('ALL'));
-    
+
     if (!filterText || '团队内部大厅 全员频道 公共群聊'.includes(filterText)) {
       this.adminTeamList.appendChild(hallDiv);
     }
@@ -269,11 +312,17 @@ export class AdminTeamModule {
     });
   }
 
-  selectAdminInternalTarget(targetUsername) {
+  selectAdminInternalTarget(targetUsername, openMobileChat = true) {
     this.adminInternalTarget = targetUsername;
     this.renderTeamList();
 
-    if (this.adminView) this.adminView.classList.add('mobile-show-chat');
+    if (this.adminView) {
+      if (openMobileChat) {
+        this.adminView.classList.add('mobile-show-chat');
+      } else {
+        this.adminView.classList.remove('mobile-show-chat');
+      }
+    }
 
     if (targetUsername === 'ALL') {
       this.adminTargetNickname.innerHTML = `📢 团队内部大厅 <span class="admin-internal-tag">内部全员</span>`;
@@ -309,7 +358,7 @@ export class AdminTeamModule {
         return m.receiverUsername === 'ALL';
       } else {
         return (m.senderUsername === this.adminInternalTarget && m.receiverUsername === this.currentAdminUsername) ||
-               (m.senderUsername === this.currentAdminUsername && m.receiverUsername === this.adminInternalTarget);
+          (m.senderUsername === this.currentAdminUsername && m.receiverUsername === this.adminInternalTarget);
       }
     });
 
@@ -377,13 +426,13 @@ export class AdminTeamModule {
     fetch(formatApiUrl('/api/admin/list'), {
       headers: { 'Authorization': `Bearer ${token}` }
     })
-    .then(r => r.json())
-    .then(res => {
-      if (res && res.success && Array.isArray(res.admins)) {
-        this.renderAdminAccountsList(res.admins);
-      }
-    })
-    .catch(err => console.error('[FETCH ADMIN ACCOUNTS ERROR]', err));
+      .then(r => r.json())
+      .then(res => {
+        if (res && res.success && Array.isArray(res.admins)) {
+          this.renderAdminAccountsList(res.admins);
+        }
+      })
+      .catch(err => console.error('[FETCH ADMIN ACCOUNTS ERROR]', err));
   }
 
   fetchAdminList() {
@@ -440,16 +489,16 @@ export class AdminTeamModule {
           },
           body: JSON.stringify({ username: adm.username, displayName: newName })
         })
-        .then(r => r.json())
-        .then(res => {
-          if (res.success) {
-            alert(`已成功更新 ${adm.username} 的显示名称为 "${newName || adm.username}"`);
-            this.fetchAdminAccountsList();
-            this.fetchAdminList();
-          } else {
-            alert('更新显示名称失败: ' + res.message);
-          }
-        });
+          .then(r => r.json())
+          .then(res => {
+            if (res.success) {
+              alert(`已成功更新 ${adm.username} 的显示名称为 "${newName || adm.username}"`);
+              this.fetchAdminAccountsList();
+              this.fetchAdminList();
+            } else {
+              alert('更新显示名称失败: ' + res.message);
+            }
+          });
       });
 
       const btnDelete = tr.querySelector('.btn-delete-admin');
@@ -466,16 +515,16 @@ export class AdminTeamModule {
               },
               body: JSON.stringify({ username: adm.username })
             })
-            .then(r => r.json())
-            .then(res => {
-              if (res.success) {
-                alert(res.message || '已成功删除该账号');
-                this.fetchAdminAccountsList();
-                this.fetchAdminList();
-              } else {
-                alert('删除失败: ' + res.message);
-              }
-            });
+              .then(r => r.json())
+              .then(res => {
+                if (res.success) {
+                  alert(res.message || '已成功删除该账号');
+                  this.fetchAdminAccountsList();
+                  this.fetchAdminList();
+                } else {
+                  alert('删除失败: ' + res.message);
+                }
+              });
           }
         });
       }
@@ -488,7 +537,7 @@ export class AdminTeamModule {
     const timeStr = this.formatTime(msg.timestamp);
     const bubbleWrapper = document.createElement('div');
     bubbleWrapper.className = `message-bubble-wrapper ${isSentByMe ? 'sent' : 'received'}`;
-    
+
     const senderName = isSentByMe ? `我 (${msg.senderUsername || this.currentAdminUsername})` : (msg.senderUsername || msg.fromNickname || '管理员');
 
     bubbleWrapper.innerHTML = `
@@ -552,5 +601,114 @@ export class AdminTeamModule {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // System Settings Modal Methods
+  openSettingsModal() {
+    if (!this.adminSettingsModal) return;
+    this.adminSettingsModal.classList.remove('hidden');
+    if (this.settingsMsg) this.settingsMsg.style.display = 'none';
+
+    const profile = window.ChatStorageManager.getProfile();
+    const token = profile ? profile.adminToken : null;
+
+    fetch(formatApiUrl('/api/admin/auto-reply'), {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success && res.config) {
+          if (this.settingAutoReplyEnabled) {
+            this.settingAutoReplyEnabled.checked = Boolean(res.config.enabled);
+          }
+          if (this.settingAutoReplyMode) {
+            this.settingAutoReplyMode.value = res.config.mode || 'first_and_followup';
+          }
+          if (this.settingAutoReplyFirstMessage) {
+            this.settingAutoReplyFirstMessage.value = res.config.firstMessage || res.config.message || '';
+          }
+          if (this.settingAutoReplyFollowupMessage) {
+            this.settingAutoReplyFollowupMessage.value = res.config.followupMessage || '';
+          }
+          this.updateSettingsModeUI();
+        }
+      })
+      .catch(err => {
+        console.error('[SETTINGS_FETCH_ERROR]', err);
+      });
+  }
+
+  updateSettingsModeUI() {
+    const mode = this.settingAutoReplyMode ? this.settingAutoReplyMode.value : 'first_and_followup';
+    if (mode === 'always_same') {
+      if (this.labelFirstMessage) this.labelFirstMessage.textContent = '通用自动回复内容（不限进线次数）';
+      if (this.containerFollowupMessage) this.containerFollowupMessage.style.display = 'none';
+    } else if (mode === 'first_only') {
+      if (this.labelFirstMessage) this.labelFirstMessage.textContent = '首次进线自动回复内容（老用户不发送）';
+      if (this.containerFollowupMessage) this.containerFollowupMessage.style.display = 'none';
+    } else {
+      // 'first_and_followup'
+      if (this.labelFirstMessage) this.labelFirstMessage.textContent = '首次进线自动回复内容';
+      if (this.containerFollowupMessage) this.containerFollowupMessage.style.display = 'block';
+    }
+  }
+
+  saveSettings() {
+    const profile = window.ChatStorageManager.getProfile();
+    const token = profile ? profile.adminToken : null;
+    const enabled = this.settingAutoReplyEnabled ? this.settingAutoReplyEnabled.checked : true;
+    const mode = this.settingAutoReplyMode ? this.settingAutoReplyMode.value : 'first_and_followup';
+    const firstMessage = this.settingAutoReplyFirstMessage ? this.settingAutoReplyFirstMessage.value.trim() : '';
+    const followupMessage = this.settingAutoReplyFollowupMessage ? this.settingAutoReplyFollowupMessage.value.trim() : '';
+
+    if (!firstMessage) {
+      this.showSettingsMessage('首次进线自动回复内容不能为空', 'error');
+      return;
+    }
+
+    if (mode === 'first_and_followup' && !followupMessage) {
+      this.showSettingsMessage('在“区分首次/再次进线回复”模式下，再次进线自动回复内容不能为空', 'error');
+      return;
+    }
+
+    fetch(formatApiUrl('/api/admin/auto-reply'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ enabled, mode, firstMessage, followupMessage, message: firstMessage })
+    })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          this.showSettingsMessage('✅ 系统设置保存成功！', 'success');
+          setTimeout(() => {
+            if (this.adminSettingsModal) this.adminSettingsModal.classList.add('hidden');
+          }, 1200);
+        } else {
+          this.showSettingsMessage(res.message || '保存失败', 'error');
+        }
+      })
+      .catch(err => {
+        this.showSettingsMessage('网络异常: ' + err.message, 'error');
+      });
+  }
+
+  showSettingsMessage(msg, type = 'error') {
+    if (!this.settingsMsg) return;
+    this.settingsMsg.style.display = 'block';
+    this.settingsMsg.textContent = msg;
+    if (type === 'success') {
+      this.settingsMsg.style.background = 'rgba(34, 197, 94, 0.15)';
+      this.settingsMsg.style.color = '#4ade80';
+      this.settingsMsg.style.border = '1px solid rgba(34, 197, 94, 0.3)';
+    } else {
+      this.settingsMsg.style.background = 'rgba(239, 68, 68, 0.15)';
+      this.settingsMsg.style.color = '#f87171';
+      this.settingsMsg.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+    }
   }
 }

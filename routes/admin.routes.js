@@ -206,6 +206,30 @@ function createAdminRouter({ verifyAdminToken, signAdminToken, ADMIN_KEY, active
     }
   });
 
+  // REST API: Get Auto Reply Config
+  router.get('/auto-reply', adminAuthMiddleware, (req, res) => {
+    try {
+      const config = ChatDatabase.getAutoReplyConfig();
+      res.json({ success: true, config });
+    } catch (err) {
+      Logger.error('ADMIN_GET_AUTOREPLY_ERROR', `Error fetching auto reply config: ${err.message}`);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // REST API: Update Auto Reply Config
+  router.post('/auto-reply', adminAuthMiddleware, (req, res) => {
+    try {
+      const { enabled, mode, firstMessage, followupMessage, message } = req.body;
+      const updated = ChatDatabase.updateAutoReplyConfig({ enabled, mode, firstMessage, followupMessage, message });
+      Logger.info('ADMIN_UPDATE_AUTOREPLY', `Admin '${req.admin ? req.admin.username : 'system'}' updated auto-reply config: mode=${updated.mode}, enabled=${updated.enabled}`);
+      res.json({ success: true, message: '离线自动回复设置已更新', config: updated });
+    } catch (err) {
+      Logger.error('ADMIN_UPDATE_AUTOREPLY_ERROR', `Error updating auto reply config: ${err.message}`);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
   return router;
 }
 

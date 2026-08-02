@@ -390,7 +390,7 @@ export class AdminCustomerModule {
     });
   }
 
-  selectUserForAdmin(clientId) {
+  selectUserForAdmin(clientId, openMobileChat = true) {
     this.adminSelectedClientId = clientId;
     window.ChatStorageManager.clearUnreadCount(clientId);
     this.renderUserList();
@@ -422,7 +422,11 @@ export class AdminCustomerModule {
     if (this.btnAdminFile) this.btnAdminFile.disabled = false;
 
     if (this.adminView) {
-      this.adminView.classList.add('mobile-show-chat');
+      if (openMobileChat) {
+        this.adminView.classList.add('mobile-show-chat');
+      } else {
+        this.adminView.classList.remove('mobile-show-chat');
+      }
     }
 
     this.renderChat();
